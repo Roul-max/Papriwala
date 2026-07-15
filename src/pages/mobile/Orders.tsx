@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { ChevronLeft, FileText, Check, Smartphone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { apiFetch } from "../../lib/apiFetch";
 
 export default function Orders() {
   const navigate = useNavigate();
@@ -9,7 +10,7 @@ export default function Orders() {
   const [tab, setTab] = useState<"live" | "history">("live");
 
   useEffect(() => {
-    fetch("/api/orders").then(r => r.json()).then(setOrders);
+    apiFetch("/api/orders").then(r => r.json()).then(data => setOrders(Array.isArray(data) ? data : []));
     // §3.6 — Device-local history from localStorage
     const saved = localStorage.getItem("orderHistory");
     if (saved) setLocalHistory(JSON.parse(saved));
