@@ -27,6 +27,7 @@ export default function AdminLogin() {
       localStorage.setItem("sessionToken", data.sessionToken);
       if (data.employee_id) localStorage.setItem("employeeId", data.employee_id);
       if (data.permissions) localStorage.setItem("accessPermissions", JSON.stringify({ [data.role]: data.permissions }));
+      if (data.avatar) { localStorage.setItem("adminAvatar", data.avatar); window.dispatchEvent(new Event("avatarChanged")); }
 
       // Redirect to first accessible page based on role permissions
       if (data.role === "Admin") {

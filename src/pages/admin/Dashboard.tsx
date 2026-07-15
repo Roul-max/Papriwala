@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DollarSign, TrendingUp, ShoppingBag, Users, Package, ArrowRight } from "lucide-react";
+import { IndianRupee, TrendingUp, ShoppingBag, Users, Package, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../../lib/apiFetch";
 
@@ -27,7 +27,7 @@ export default function AdminDashboard() {
 
   const cards = analytics
     ? [
-        { title: "Today's Revenue", value: fmt(analytics.totalRevenue), icon: DollarSign, sub: `${analytics.totalSales} paid orders`, color: "text-green-600 bg-green-50" },
+        { title: "Today's Revenue", value: fmt(analytics.totalRevenue), icon: IndianRupee, sub: `${analytics.totalSales} paid orders`, color: "text-green-600 bg-green-50" },
         { title: "Total Orders Today", value: analytics.totalOrders, icon: ShoppingBag, sub: "All pipeline states", color: "text-blue-600 bg-blue-50" },
         { title: "Total Dealers", value: dealers.length, icon: Users, sub: "Active suppliers", color: "text-purple-600 bg-purple-50" },
         { title: "Total Products", value: analytics.totalProducts, icon: Package, sub: `${analytics.lowStock} low · ${analytics.outOfStock} out`, color: "text-maroon bg-cream" },
@@ -51,11 +51,13 @@ export default function AdminDashboard() {
             ))
           : cards.map((card, i) => (
               <div key={i} className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col">
-                <div className="flex justify-between items-start mb-4">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${card.color}`}>
-                    <card.icon size={24} />
+                {card.icon && (
+                  <div className="flex justify-between items-start mb-4">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${card.color}`}>
+                      <card.icon size={24} />
+                    </div>
                   </div>
-                </div>
+                )}
                 <h3 className="text-gray-500 text-sm font-medium">{card.title}</h3>
                 <p className="text-2xl font-bold text-gray-800 mt-1">{card.value}</p>
                 <p className="text-xs text-gray-400 mt-1">{card.sub}</p>

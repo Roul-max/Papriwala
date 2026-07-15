@@ -51,7 +51,8 @@ create table if not exists employees (
   salary_type_flag text check (salary_type_flag in ('Monthly','Daily')),
   base_compensation_rate decimal(10,2),
   joining_date date not null,
-  last_working_date date
+  last_working_date date,
+  avatar text
 );
 
 -- 6. Attendance

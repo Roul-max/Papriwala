@@ -147,6 +147,18 @@ router.delete("/employees/:id", async (req, res) => {
   res.json({ success: true });
 });
 
+router.patch("/employees/:id", async (req, res) => {
+  const { name, full_name, avatar } = req.body;
+  const patch: any = {};
+  if (name)      patch.name      = name;
+  if (full_name) patch.full_name = full_name;
+  if (avatar !== undefined) patch.avatar = avatar;
+  const updated = await dbUpdate("employees", req.params.id, patch);
+  const local = db.employees.find((e: any) => e.id === req.params.id);
+  if (local) Object.assign(local, patch);
+  res.json(updated);
+});
+
 // ─── Attendance ──────────────────────────────────────────────────────────────
 router.get("/attendance", async (req, res) => {
   const date = req.query.date?.toString();
@@ -237,6 +249,7 @@ router.post("/auth/login", async (req, res) => {
         role: emp.designation_tag,
         name: emp.name,
         employee_id: emp.id,
+        avatar: emp.avatar || null,
         permissions: settings?.permissions?.[emp.designation_tag] || {},
         sessionToken: token,
       });

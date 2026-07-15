@@ -1,39 +1,79 @@
 import React, { useState, useRef, useEffect } from "react";
-import { User, Camera, Lock, CheckCircle2, AlertCircle } from "lucide-react";
+import { User, Camera, Lock, CheckCircle2, AlertCircle, Pencil, X } from "lucide-react";
 import { apiFetch } from "../../lib/apiFetch";
 
 export default function AdminProfile() {
   const [avatar, setAvatar] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [nameError, setNameError] = useState("");
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [passwordSuccess, setPasswordSuccess] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const role = localStorage.getItem("adminRole") || "";
-  const name = localStorage.getItem("adminName") || "Super Admin";
+  const employeeId = localStorage.getItem("employeeId") || "";
   const isAdmin = role === "Admin";
 
   useEffect(() => {
     const savedAvatar = localStorage.getItem("adminAvatar");
+    const savedName = localStorage.getItem("adminName") || (isAdmin ? "Super Admin" : "");
     if (savedAvatar) setAvatar(savedAvatar);
+    setDisplayName(savedName);
+    setNameInput(savedName);
   }, []);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ── Photo upload ────────────────────────────────────────────────────────────
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64String = reader.result as string;
-        setAvatar(base64String);
-        localStorage.setItem("adminAvatar", base64String);
-        window.dispatchEvent(new Event("avatarChanged"));
-      };
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64 = reader.result as string;
+      setAvatar(base64);
+      localStorage.setItem("adminAvatar", base64);
+      window.dispatchEvent(new Event("avatarChanged"));
+      // Persist to server for employees
+      if (!isAdmin && employeeId) {
+        await apiFetch(`/api/employees/${employeeId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ avatar: base64 }),
+        });
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
+  // ── Rename ──────────────────────────────────────────────────────────────────
+  const handleSaveName = async () => {
+    setNameError("");
+    const trimmed = nameInput.trim();
+    if (!trimmed) { setNameError("Name cannot be empty."); return; }
+    if (!/^[A-Za-z\s]+$/.test(trimmed)) { setNameError("Name must contain alphabetic characters only."); return; }
+    if (!isAdmin && employeeId) {
+      const res = await apiFetch(`/api/employees/${employeeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed, full_name: trimmed }),
+      });
+      if (!res.ok) { setNameError("Failed to save. Try again."); return; }
+    }
+    setDisplayName(trimmed);
+    localStorage.setItem("adminName", trimmed);
+    setEditingName(false);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 3000);
+  };
+
+  // ── Password change (Admin only) ────────────────────────────────────────────
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError("");
@@ -62,36 +102,70 @@ export default function AdminProfile() {
       <h1 className="text-2xl font-serif text-maroon font-bold mb-6">Profile Settings</h1>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Profile Card */}
+
+        {/* ── Profile Card ── */}
         <div className="md:col-span-1">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
-            <div className="relative mb-4 group cursor-pointer" onClick={() => isAdmin && fileInputRef.current?.click()}>
+
+            {/* Avatar */}
+            <div className="relative mb-4 group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
               <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-cream-light bg-gray-50 flex items-center justify-center shadow-inner relative">
-                {avatar ? (
-                  <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <User size={48} className="text-gray-300" />
-                )}
-                {isAdmin && (
-                  <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Camera size={24} className="text-white mb-1" />
-                    <span className="text-white text-xs font-semibold">Change Photo</span>
-                  </div>
-                )}
+                {avatar
+                  ? <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
+                  : <User size={48} className="text-gray-300" />
+                }
+                <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Camera size={24} className="text-white mb-1" />
+                  <span className="text-white text-xs font-semibold">Change Photo</span>
+                </div>
               </div>
-              {isAdmin && (
-                <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
-              )}
+              <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
             </div>
-            <h2 className="text-xl font-bold text-gray-800">{name}</h2>
+
+            {/* Name with inline edit */}
+            {editingName ? (
+              <div className="w-full mb-2">
+                <input
+                  type="text"
+                  value={nameInput}
+                  onChange={e => { setNameInput(e.target.value); setNameError(""); }}
+                  onKeyDown={e => { if (e.key === "Enter") handleSaveName(); if (e.key === "Escape") { setEditingName(false); setNameInput(displayName); } }}
+                  className="w-full border border-maroon rounded px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-maroon"
+                  autoFocus
+                />
+                {nameError && <p className="text-red-500 text-xs mt-1">{nameError}</p>}
+                <div className="flex gap-2 mt-2 justify-center">
+                  <button onClick={handleSaveName} className="bg-maroon text-white text-xs px-3 py-1 rounded font-semibold hover:bg-maroon-light">Save</button>
+                  <button onClick={() => { setEditingName(false); setNameInput(displayName); setNameError(""); }}
+                    className="bg-gray-100 text-gray-600 text-xs px-3 py-1 rounded font-semibold hover:bg-gray-200">
+                    <X size={12} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="text-xl font-bold text-gray-800">{displayName}</h2>
+                <button onClick={() => { setEditingName(true); setNameInput(displayName); }}
+                  className="text-gray-400 hover:text-maroon transition-colors" title="Rename">
+                  <Pencil size={14} />
+                </button>
+              </div>
+            )}
+
             <p className="text-sm text-gray-500 mb-3">{isAdmin ? "admin@papriwale.com" : `Role: ${role}`}</p>
             <div className={`inline-flex items-center px-3 py-1 text-xs font-bold rounded-full ${isAdmin ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"}`}>
               {isAdmin ? "Full Access" : role}
             </div>
+
+            {saveSuccess && (
+              <div className="flex items-center gap-1 text-green-600 text-xs font-semibold mt-3">
+                <CheckCircle2 size={13} /> Profile updated!
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Change Password — Admin only */}
+        {/* ── Right Panel ── */}
         <div className="md:col-span-2">
           {isAdmin ? (
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
@@ -135,10 +209,20 @@ export default function AdminProfile() {
               </form>
             </div>
           ) : (
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center min-h-[200px]">
-              <Lock size={40} className="text-gray-200 mb-3" />
-              <p className="text-gray-500 font-semibold">Password management is restricted to Admin only.</p>
-              <p className="text-gray-400 text-sm mt-1">Contact your administrator to reset your credentials.</p>
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 space-y-4">
+              <div className="flex items-center gap-3 pb-4 border-b border-gray-100">
+                <User className="text-maroon" />
+                <h2 className="text-xl font-bold text-gray-800">Your Profile</h2>
+              </div>
+              <p className="text-sm text-gray-500">You can update your display name and profile photo using the card on the left.</p>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-gray-500 font-semibold">Employee ID</span><span className="font-mono text-gray-700">{employeeId || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500 font-semibold">Role</span><span className="font-semibold text-blue-700">{role}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500 font-semibold">Display Name</span><span className="text-gray-700">{displayName}</span></div>
+              </div>
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
+                <Lock size={13} /> Password changes are managed by Admin only.
+              </div>
             </div>
           )}
         </div>
