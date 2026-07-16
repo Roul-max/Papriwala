@@ -77,15 +77,19 @@ export const db: any = {
 // ─── Bootstrap: load persisted settings (incl. adminPasswordHash) on startup ─
 export async function bootstrapDb() {
   if (!supabase) return;
-  const { data } = await supabase.from("settings").select("value").eq("id", 1).single().catch(() => ({ data: null }));
-  if (data?.value) {
-    Object.assign(db.settings, data.value);
-    if (data.value.adminPasswordHash) {
-      db.adminPasswordHash = data.value.adminPasswordHash;
-      console.log("✅ Admin password hash loaded from Supabase.");
-    } else {
-      console.warn("⚠️  No adminPasswordHash found in Supabase settings.");
+  try {
+    const { data } = await supabase.from("settings").select("value").eq("id", 1).single();
+    if (data?.value) {
+      Object.assign(db.settings, data.value);
+      if (data.value.adminPasswordHash) {
+        db.adminPasswordHash = data.value.adminPasswordHash;
+        console.log("✅ Admin password hash loaded from Supabase.");
+      } else {
+        console.warn("⚠️  No adminPasswordHash found in Supabase settings.");
+      }
     }
+  } catch {
+    console.warn("⚠️  Could not load settings from Supabase.");
   }
 }
 
