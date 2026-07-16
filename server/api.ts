@@ -5,9 +5,114 @@ import { broadcast } from "./ws.js";
 import bcrypt from "bcryptjs";
 
 const router = Router();
+
+// ─── OTP store ───────────────────────────────────────────────────────────────
+const otpStore = new Map<string, { otp: string; expires: number; employeeId: string }>();
+
+// ─── Public auth routes (NO middleware) ──────────────────────────────────────
+router.post("/auth/login", async (req, res) => {
+  const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "unknown";
+  const { allowed, retryAfterSecs } = checkRateLimit(ip);
+  if (!allowed) return res.status(429).json({ error: `Too many attempts. Try again in ${Math.ceil(retryAfterSecs / 60)} min.` });
+
+  const { username, password, role } = req.body;
+  const u = (username ?? "").trim();
+  const p = (password ?? "").trim();
+
+  if (role === "Admin" && u === "admin") {
+    if (!db.adminPasswordHash) return res.status(401).json({ error: "Admin password not set. Please set it first." });
+    const isMatch = await bcrypt.compare(p, db.adminPasswordHash);
+    if (isMatch) {
+      resetRateLimit(ip);
+      const token = await createSession("Admin", "Super Admin");
+      return res.json({ success: true, role: "Admin", name: "Super Admin", sessionToken: token });
+    }
+  }
+
+  if (role === "Employee") {
+    const employees = await dbSelect("employees", db.employees);
+    const emp = employees.find((e: any) => e.name?.toLowerCase() === u.toLowerCase() && e.phone_number === p);
+    if (emp) {
+      resetRateLimit(ip);
+      const token = await createSession(emp.designation_tag, emp.name, emp.id);
+      if (!db.employee_sessions) db.employee_sessions = [];
+      const sess = { id: crypto.randomUUID(), employee_id: emp.id, login_time: new Date().toISOString(), logout_time: null, session_token: token };
+      await dbInsert("employee_sessions", sess, db.employee_sessions);
+      return res.json({
+        success: true, role: emp.designation_tag, name: emp.name,
+        employee_id: emp.id, avatar: emp.avatar || null,
+        permissions: db.settings?.permissions?.[emp.designation_tag] || {},
+        sessionToken: token,
+      });
+    }
+  }
+
+  res.status(401).json({ error: "Invalid credentials" });
+});
+
+router.post("/auth/set-password", async (req, res) => {
+  if (db.adminPasswordHash) return res.status(403).json({ error: "Password already set. Use change-password instead." });
+  const { new_pass } = req.body;
+  const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}/;
+  if (!new_pass || !passRegex.test(new_pass)) return res.status(400).json({ error: "Password must be 8+ chars with upper, lower, number and special character." });
+  const hashed = await bcrypt.hash(new_pass, 12);
+  db.adminPasswordHash = hashed;
+  if (supabase) await supabase.from("settings").upsert({ id: 1, value: { ...db.settings, adminPasswordHash: hashed } });
+  res.json({ success: true });
+});
+
+router.post("/auth/send-otp", async (req, res) => {
+  const phone = (req.body.phone ?? "").trim();
+  if (!phone) return res.status(400).json({ error: "Phone number required" });
+  const employees = await dbSelect("employees", db.employees);
+  const emp = employees.find((e: any) => e.phone_number === phone);
+  if (!emp) return res.status(404).json({ error: "No employee found with this phone number" });
+  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  otpStore.set(phone, { otp, expires: Date.now() + 5 * 60 * 1000, employeeId: emp.id });
+  console.log(`[OTP] Phone: ${phone} | OTP: ${otp} | Employee: ${emp.name}`);
+  res.json({ success: true, message: "OTP sent" });
+});
+
+router.post("/auth/verify-otp", async (req, res) => {
+  const phone = (req.body.phone ?? "").trim();
+  const otp   = (req.body.otp   ?? "").trim();
+  const entry = otpStore.get(phone);
+  if (!entry) return res.status(400).json({ error: "No OTP requested for this number" });
+  if (Date.now() > entry.expires) { otpStore.delete(phone); return res.status(400).json({ error: "OTP expired. Please request a new one." }); }
+  if (entry.otp !== otp) return res.status(401).json({ error: "Invalid OTP" });
+  otpStore.delete(phone);
+  const employees = await dbSelect("employees", db.employees);
+  const emp = employees.find((e: any) => e.id === entry.employeeId);
+  if (!emp) return res.status(404).json({ error: "Employee not found" });
+  const token = await createSession(emp.designation_tag, emp.name, emp.id);
+  res.json({ success: true, role: emp.designation_tag, name: emp.name, employee_id: emp.id, permissions: db.settings?.permissions?.[emp.designation_tag] || {}, sessionToken: token });
+});
+
+router.post("/auth/forbidden-alert", (req, res) => {
+  const { path, role } = req.body;
+  broadcast({ type: "FORBIDDEN_ACCESS_ATTEMPT", payload: { path, role, timestamp: new Date().toISOString() } });
+  res.json({ ok: true });
+});
+
+router.post("/auth/logout", async (req, res) => {
+  const token = req.header("X-Session-Token") || "";
+  if (token) {
+    await destroySession(token);
+    if (db.employee_sessions) {
+      const s = db.employee_sessions.find((s: any) => s.session_token === token && !s.logout_time);
+      if (s) {
+        s.logout_time = new Date().toISOString();
+        if (supabase) await supabase.from("employee_sessions").update({ logout_time: s.logout_time }).eq("session_token", token).catch(() => {});
+      }
+    }
+  }
+  res.json({ success: true });
+});
+
+// ─── Apply auth middleware to all routes below ────────────────────────────────
 router.use(roleAuthMiddleware);
 
-// Health check
+// ─── Health ───────────────────────────────────────────────────────────────────
 router.get("/health", (req, res) => res.json({ status: "ok", supabase: !!supabase }));
 
 // ─── Products ────────────────────────────────────────────────────────────────
@@ -121,6 +226,15 @@ router.delete("/dealers/:id", async (req, res) => {
   res.json({ success: true });
 });
 
+router.post("/dealers/:id/invoice-due", async (req, res) => {
+  const dealers = await dbSelect("dealers", db.dealers);
+  const dealer = dealers.find((d: any) => d.id === req.params.id);
+  if (!dealer) return res.status(404).json({ error: "Not found" });
+  const { amount_due, expiry_date } = req.body;
+  broadcast({ type: "DEALER_INVOICE_DUE", payload: { dealer_id: dealer.id, dealer_name: dealer.name, amount_due, expiry_date } });
+  res.json({ ok: true });
+});
+
 // ─── Expenses ────────────────────────────────────────────────────────────────
 router.get("/expenses", async (req, res) => {
   res.json(await dbSelect("expenses", db.expenses));
@@ -194,19 +308,17 @@ router.get("/settings", async (req, res) => {
 
 router.post("/settings", async (req, res) => {
   db.settings = { ...db.settings, ...req.body };
-  if (supabase) {
-    await supabase.from("settings").upsert({ id: 1, value: db.settings });
-  }
+  if (supabase) await supabase.from("settings").upsert({ id: 1, value: db.settings });
   res.json(db.settings);
 });
 
-// ─── Password change — bcrypt §5.2 ───────────────────────────────────────────
+// ─── Change password (requires session) ──────────────────────────────────────
 router.post("/auth/change-password", async (req, res) => {
   const { current_pass, new_pass } = req.body;
   if (!current_pass || !new_pass) return res.status(400).json({ error: "Missing fields" });
   const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}/;
   if (!passRegex.test(new_pass)) return res.status(400).json({ error: "Password does not meet complexity requirements" });
-  if (!db.adminPasswordHash) return res.status(400).json({ error: "No password set yet. Use /auth/set-password to initialise." });
+  if (!db.adminPasswordHash) return res.status(400).json({ error: "No password set yet." });
   const isMatch = await bcrypt.compare(current_pass, db.adminPasswordHash);
   if (!isMatch) return res.status(401).json({ error: "Current password is incorrect" });
   const hashed = await bcrypt.hash(new_pass, 12);
@@ -215,126 +327,7 @@ router.post("/auth/change-password", async (req, res) => {
   res.json({ success: true });
 });
 
-// ─── First-time password setup (only works when no password is set yet) ───────
-router.post("/auth/set-password", async (req, res) => {
-  if (db.adminPasswordHash) return res.status(403).json({ error: "Password already set. Use change-password instead." });
-  const { new_pass } = req.body;
-  const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}/;
-  if (!new_pass || !passRegex.test(new_pass)) return res.status(400).json({ error: "Password must be 8+ chars with upper, lower, number and special character." });
-  const hashed = await bcrypt.hash(new_pass, 12);
-  db.adminPasswordHash = hashed;
-  if (supabase) await supabase.from("settings").upsert({ id: 1, value: { ...db.settings, adminPasswordHash: hashed } });
-  res.json({ success: true });
-});
-
-// ─── 403 alert broadcast ─────────────────────────────────────────────────────
-router.post("/auth/forbidden-alert", (req, res) => {
-  const { path, role } = req.body;
-  broadcast({ type: "FORBIDDEN_ACCESS_ATTEMPT", payload: { path, role, timestamp: new Date().toISOString() } });
-  res.json({ ok: true });
-});
-
-// ─── Login ────────────────────────────────────────────────────────────────────
-router.post("/auth/login", async (req, res) => {
-  const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "unknown";
-  const { allowed, retryAfterSecs } = checkRateLimit(ip);
-  if (!allowed) return res.status(429).json({ error: `Too many attempts. Try again in ${Math.ceil(retryAfterSecs / 60)} min.` });
-
-  const { username, password, role } = req.body;
-  const u = (username ?? "").trim();
-  const p = (password ?? "").trim();
-
-  if (role === "Admin" && u === "admin") {
-    if (!db.adminPasswordHash) return res.status(401).json({ error: "Admin password not set. Please set it first." });
-    const isMatch = await bcrypt.compare(p, db.adminPasswordHash);
-    if (isMatch) {
-      resetRateLimit(ip);
-      const token = await createSession("Admin", "Super Admin");
-      return res.json({ success: true, role: "Admin", name: "Super Admin", sessionToken: token });
-    }
-  }
-
-  if (role === "Employee") {
-    const employees = await dbSelect("employees", db.employees);
-    const emp = employees.find((e: any) => e.name?.toLowerCase() === u.toLowerCase() && e.phone_number === p);
-    if (emp) {
-      resetRateLimit(ip);
-      const token = await createSession(emp.designation_tag, emp.name, emp.id);
-      if (!db.employee_sessions) db.employee_sessions = [];
-      const sess = { id: crypto.randomUUID(), employee_id: emp.id, login_time: new Date().toISOString(), logout_time: null, session_token: token };
-      await dbInsert("employee_sessions", sess, db.employee_sessions);
-      return res.json({
-        success: true, role: emp.designation_tag, name: emp.name,
-        employee_id: emp.id, avatar: emp.avatar || null,
-        permissions: db.settings?.permissions?.[emp.designation_tag] || {},
-        sessionToken: token,
-      });
-    }
-  }
-
-  res.status(401).json({ error: "Invalid credentials" });
-});
-
-// ─── Logout ───────────────────────────────────────────────────────────────────
-router.post("/auth/logout", async (req, res) => {
-  const token = req.header("X-Session-Token") || "";
-  if (token) {
-    await destroySession(token);
-    if (db.employee_sessions) {
-      const s = db.employee_sessions.find((s: any) => s.session_token === token && !s.logout_time);
-      if (s) {
-        s.logout_time = new Date().toISOString();
-        if (supabase) await supabase.from("employee_sessions").update({ logout_time: s.logout_time }).eq("session_token", token).catch(() => {});
-      }
-    }
-  }
-  res.json({ success: true });
-});
-
-// ─── OTP store (in-memory, expires in 5 min) ─────────────────────────────────
-const otpStore = new Map<string, { otp: string; expires: number; employeeId: string }>();
-
-// ─── Send OTP ────────────────────────────────────────────────────────────────
-router.post("/auth/send-otp", async (req, res) => {
-  const phone = (req.body.phone ?? "").trim();
-  if (!phone) return res.status(400).json({ error: "Phone number required" });
-  const employees = await dbSelect("employees", db.employees);
-  const emp = employees.find((e: any) => e.phone_number === phone);
-  if (!emp) return res.status(404).json({ error: "No employee found with this phone number" });
-  const otp = String(Math.floor(100000 + Math.random() * 900000));
-  otpStore.set(phone, { otp, expires: Date.now() + 5 * 60 * 1000, employeeId: emp.id });
-  console.log(`[OTP] Phone: ${phone} | OTP: ${otp} | Employee: ${emp.name}`);
-  res.json({ success: true, message: "OTP sent" });
-});
-
-// ─── Verify OTP ──────────────────────────────────────────────────────────────
-router.post("/auth/verify-otp", async (req, res) => {
-  const phone = (req.body.phone ?? "").trim();
-  const otp   = (req.body.otp   ?? "").trim();
-  const entry = otpStore.get(phone);
-  if (!entry) return res.status(400).json({ error: "No OTP requested for this number" });
-  if (Date.now() > entry.expires) { otpStore.delete(phone); return res.status(400).json({ error: "OTP expired. Please request a new one." }); }
-  if (entry.otp !== otp) return res.status(401).json({ error: "Invalid OTP" });
-  otpStore.delete(phone);
-  const employees = await dbSelect("employees", db.employees);
-  const emp = employees.find((e: any) => e.id === entry.employeeId);
-  if (!emp) return res.status(404).json({ error: "Employee not found" });
-  const settings = db.settings;
-  const token = await createSession(emp.designation_tag, emp.name, emp.id);
-  res.json({ success: true, role: emp.designation_tag, name: emp.name, employee_id: emp.id, permissions: settings?.permissions?.[emp.designation_tag] || {}, sessionToken: token });
-});
-
-// ─── Dealer invoice due ──────────────────────────────────────────────────────
-router.post("/dealers/:id/invoice-due", async (req, res) => {
-  const dealers = await dbSelect("dealers", db.dealers);
-  const dealer = dealers.find((d: any) => d.id === req.params.id);
-  if (!dealer) return res.status(404).json({ error: "Not found" });
-  const { amount_due, expiry_date } = req.body;
-  broadcast({ type: "DEALER_INVOICE_DUE", payload: { dealer_id: dealer.id, dealer_name: dealer.name, amount_due, expiry_date } });
-  res.json({ ok: true });
-});
-
-// ─── Raw Material Purchases ─────────────────────────────────────────────────
+// ─── Raw Material Purchases ───────────────────────────────────────────────────
 router.get("/raw-material-purchases", async (req, res) => {
   if (!db.raw_material_purchases) db.raw_material_purchases = [];
   res.json(await dbSelect("raw_material_purchases", db.raw_material_purchases));

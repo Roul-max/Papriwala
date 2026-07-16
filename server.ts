@@ -6,8 +6,10 @@ import { WebSocketServer } from "ws";
 import { createServer } from "http";
 import apiRoutes from "./server/api.js";
 import { handleWebSocketConnection } from "./server/ws.js";
+import { bootstrapDb } from "./server/db.js";
 
 async function startServer() {
+  await bootstrapDb();
   const app = express();
   const PORT = process.env.PORT || 3000;
 

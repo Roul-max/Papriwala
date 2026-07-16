@@ -95,6 +95,7 @@ export function resetRateLimit(ip: string): void {
 const PUBLIC_PATHS = new Set([
   "/health",
   "/auth/login",
+  "/auth/set-password",
   "/auth/send-otp",
   "/auth/verify-otp",
 ]);
