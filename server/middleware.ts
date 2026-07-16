@@ -27,7 +27,7 @@ export async function createSession(role: string, name: string, employeeId?: str
       employee_id: employeeId || null,
       created_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
-    }).catch(() => {});
+    }).then(() => {}).catch(() => {});
   }
   sessionStore.set(token, session);
   return token;
@@ -36,7 +36,7 @@ export async function createSession(role: string, name: string, employeeId?: str
 export async function destroySession(token: string): Promise<void> {
   sessionStore.delete(token);
   if (supabase) {
-    await supabase.from("sessions").delete().eq("token", token).catch(() => {});
+    try { await supabase.from("sessions").delete().eq("token", token); } catch {}
   }
 }
 
@@ -46,7 +46,7 @@ async function getSession(token: string): Promise<Session | null> {
   if (mem) {
     if (Date.now() - mem.createdAt > SESSION_TTL_MS) {
       sessionStore.delete(token);
-      if (supabase) await supabase.from("sessions").delete().eq("token", token).catch(() => {});
+      if (supabase) try { await supabase.from("sessions").delete().eq("token", token); } catch {}
       return null;
     }
     mem.createdAt = Date.now();
@@ -54,15 +54,17 @@ async function getSession(token: string): Promise<Session | null> {
   }
   // Fallback: check Supabase (handles server restarts)
   if (supabase) {
-    const { data } = await supabase.from("sessions").select("*").eq("token", token).single().catch(() => ({ data: null }));
-    if (!data) return null;
-    if (new Date(data.expires_at).getTime() < Date.now()) {
-      await supabase.from("sessions").delete().eq("token", token).catch(() => {});
-      return null;
-    }
-    const session: Session = { role: data.role, name: data.name, employeeId: data.employee_id, createdAt: new Date(data.created_at).getTime() };
-    sessionStore.set(token, session); // cache in memory
-    return session;
+    try {
+      const { data } = await supabase.from("sessions").select("*").eq("token", token).single();
+      if (!data) return null;
+      if (new Date(data.expires_at).getTime() < Date.now()) {
+        try { await supabase.from("sessions").delete().eq("token", token); } catch {}
+        return null;
+      }
+      const session: Session = { role: data.role, name: data.name, employeeId: data.employee_id, createdAt: new Date(data.created_at).getTime() };
+      sessionStore.set(token, session);
+      return session;
+    } catch { return null; }
   }
   return null;
 }

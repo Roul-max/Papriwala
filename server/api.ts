@@ -102,7 +102,7 @@ router.post("/auth/logout", async (req, res) => {
       const s = db.employee_sessions.find((s: any) => s.session_token === token && !s.logout_time);
       if (s) {
         s.logout_time = new Date().toISOString();
-        if (supabase) await supabase.from("employee_sessions").update({ logout_time: s.logout_time }).eq("session_token", token).catch(() => {});
+        if (supabase) try { await supabase.from("employee_sessions").update({ logout_time: s.logout_time }).eq("session_token", token); } catch {}
       }
     }
   }
