@@ -63,8 +63,10 @@ export default function ProductList() {
             >
               <Heart size={20} fill={isInWishlist(product.id) ? 'currentColor' : 'none'} />
             </button>
-            <div className="w-24 h-24 rounded-lg overflow-hidden shrink-0">
-              <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+            <div className="w-24 h-24 rounded-lg overflow-hidden shrink-0 bg-amber-50">
+              {product.image
+                ? <img src={product.image} alt={product.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).src = "/cover.png"; }} />
+                : <img src="/cover.png" alt={product.name} className="w-full h-full object-cover" />}
             </div>
             <div className="ml-4 flex flex-col justify-between py-1 flex-1">
               <div>

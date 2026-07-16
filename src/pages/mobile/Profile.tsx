@@ -1,34 +1,48 @@
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, User, LogOut, Camera, Edit2, Check } from "lucide-react";
 import React, { useState, useRef, useEffect } from "react";
+import { apiFetch } from "../../lib/apiFetch";
 
 export default function Profile() {
   const navigate = useNavigate();
   const [avatar, setAvatar] = useState<string | null>(null);
-  const [name, setName] = useState("Customer");
+  const [name, setName] = useState("Guest");
+  const [role, setRole] = useState("");
+  const [phone, setPhone] = useState("");
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const adminRole   = localStorage.getItem("adminRole");
+    const adminName   = localStorage.getItem("adminName");
+    const adminAvatar = localStorage.getItem("adminAvatar");
     const savedAvatar = localStorage.getItem("customerAvatar");
-    const savedName = localStorage.getItem("customerName");
-    if (savedAvatar) setAvatar(savedAvatar);
-    if (savedName) setName(savedName);
+    const savedName   = localStorage.getItem("customerName");
+    const savedPhone  = localStorage.getItem("employeePhone") || "";
+
+    if (adminRole && adminName) {
+      setName(adminName);
+      setRole(adminRole);
+      setPhone(savedPhone);
+      if (adminAvatar) setAvatar(adminAvatar);
+    } else {
+      if (savedAvatar) setAvatar(savedAvatar);
+      if (savedName)   setName(savedName);
+    }
   }, []);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64String = reader.result as string;
-        setAvatar(base64String);
-        localStorage.setItem("customerAvatar", base64String);
-        window.dispatchEvent(new Event("customerProfileUpdated"));
-      };
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const b64 = reader.result as string;
+      setAvatar(b64);
+      localStorage.setItem("customerAvatar", b64);
+      window.dispatchEvent(new Event("customerProfileUpdated"));
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleNameSave = () => {
@@ -43,68 +57,56 @@ export default function Profile() {
   return (
     <div className="flex flex-col min-h-full bg-cream-light pb-24">
       <div className="bg-white p-4 flex items-center border-b border-gray-100 sticky top-0 z-10 shadow-sm">
-        <button onClick={() => navigate(-1)} className="mr-4 text-maroon">
-          <ChevronLeft size={24} />
-        </button>
+        <button onClick={() => navigate(-1)} className="mr-4 text-maroon"><ChevronLeft size={24} /></button>
         <h2 className="font-serif text-xl text-gold font-bold uppercase tracking-wider">PROFILE</h2>
       </div>
 
       <div className="p-4 space-y-4">
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 flex flex-col items-center">
-          
           <div className="relative mb-4">
-            <div 
-              className="w-24 h-24 bg-maroon rounded-full flex items-center justify-center text-gold border-4 border-cream-light shadow-inner overflow-hidden"
-            >
-              {avatar ? (
-                <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
-              ) : (
-                <User size={48} />
-              )}
+            <div className="w-24 h-24 bg-maroon rounded-full flex items-center justify-center text-gold border-4 border-cream-light shadow-inner overflow-hidden">
+              {avatar
+                ? <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
+                : <User size={48} />}
             </div>
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="absolute bottom-0 right-0 bg-gold text-white p-2 rounded-full shadow-md border-2 border-white"
-            >
+            <button onClick={() => fileInputRef.current?.click()}
+              className="absolute bottom-0 right-0 bg-gold text-white p-2 rounded-full shadow-md border-2 border-white">
               <Camera size={16} />
             </button>
-            <input 
-              type="file" 
-              ref={fileInputRef}
-              onChange={handleImageUpload} 
-              accept="image/*" 
-              className="hidden" 
-            />
+            <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
           </div>
 
           {isEditingName ? (
             <div className="flex items-center gap-2 mb-2 w-full max-w-[200px]">
-              <input 
-                type="text"
-                value={tempName}
-                onChange={(e) => setTempName(e.target.value)}
+              <input type="text" value={tempName} onChange={e => setTempName(e.target.value)}
                 className="w-full border-b-2 border-maroon focus:outline-none text-center font-bold text-lg text-gray-800 bg-transparent py-1"
-                autoFocus
-              />
+                autoFocus />
               <button onClick={handleNameSave} className="text-green-600 p-1 bg-green-50 rounded-full">
                 <Check size={18} />
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2 mb-2 group">
+            <div className="flex items-center gap-2 mb-2">
               <h3 className="font-bold text-xl text-gray-800">{name}</h3>
-              <button 
-                onClick={() => { setTempName(name); setIsEditingName(true); }}
-                className="text-gray-400 p-1"
-              >
+              <button onClick={() => { setTempName(name); setIsEditingName(true); }} className="text-gray-400 p-1">
                 <Edit2 size={16} />
               </button>
             </div>
           )}
 
-          <p className="text-gray-500 text-sm mb-8">+91 98765 43210</p>
-          
-          <button onClick={() => navigate("/login")} className="w-full bg-red-50 text-red-600 font-bold py-3 rounded-xl hover:bg-red-100 transition-colors border border-red-100 flex items-center justify-center gap-2">
+          {role && (
+            <span className="bg-maroon/10 text-maroon text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">{role}</span>
+          )}
+          {phone && (
+            <p className="text-gray-500 text-sm mb-4">+91 {phone.slice(0,5)} {phone.slice(5)}</p>
+          )}
+
+          <button onClick={() => {
+            const token = localStorage.getItem("sessionToken") || "";
+            if (token) apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+            localStorage.clear(); sessionStorage.clear();
+            navigate("/login");
+          }} className="w-full bg-red-50 text-red-600 font-bold py-3 rounded-xl hover:bg-red-100 transition-colors border border-red-100 flex items-center justify-center gap-2 mt-2">
             <LogOut size={20} /> Logout
           </button>
         </div>
@@ -117,10 +119,12 @@ export default function Profile() {
               <p className="text-xs text-gray-500 mt-1">Get updates about your order status</p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" className="sr-only peer" defaultChecked={localStorage.getItem("notificationsEnabled") !== "false"} onChange={(e) => {
-                localStorage.setItem("notificationsEnabled", e.target.checked.toString());
-                window.dispatchEvent(new Event("notificationsPreferenceChanged"));
-              }} />
+              <input type="checkbox" className="sr-only peer"
+                defaultChecked={localStorage.getItem("notificationsEnabled") !== "false"}
+                onChange={e => {
+                  localStorage.setItem("notificationsEnabled", e.target.checked.toString());
+                  window.dispatchEvent(new Event("notificationsPreferenceChanged"));
+                }} />
               <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-maroon"></div>
             </label>
           </div>

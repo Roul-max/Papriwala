@@ -1,11 +1,9 @@
 import { Request, Response, NextFunction } from "express";
-import { db } from "./db.js";
+import { db, supabase } from "./db.js";
 import { broadcast } from "./ws.js";
 import crypto from "crypto";
 
-// ─── Server-side session store ────────────────────────────────────────────────
-// Maps sessionToken → { role, employeeId, createdAt }
-// Tokens expire after 12 hours of inactivity.
+// ─── Session interface ────────────────────────────────────────────────────────
 export interface Session {
   role: string;
   employeeId?: string;
@@ -14,28 +12,82 @@ export interface Session {
 }
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+// In-memory fallback (used only when Supabase is unavailable)
 export const sessionStore = new Map<string, Session>();
 
-export function createSession(role: string, name: string, employeeId?: string): string {
+export async function createSession(role: string, name: string, employeeId?: string): Promise<string> {
   const token = crypto.randomBytes(32).toString("hex");
-  sessionStore.set(token, { role, name, employeeId, createdAt: Date.now() });
+  const session: Session = { role, name, employeeId, createdAt: Date.now() };
+  if (supabase) {
+    await supabase.from("sessions").insert({
+      token,
+      role,
+      name,
+      employee_id: employeeId || null,
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
+    }).catch(() => {});
+  }
+  sessionStore.set(token, session);
   return token;
 }
 
-export function destroySession(token: string): void {
+export async function destroySession(token: string): Promise<void> {
   sessionStore.delete(token);
+  if (supabase) {
+    await supabase.from("sessions").delete().eq("token", token).catch(() => {});
+  }
 }
 
-function getSession(token: string): Session | null {
-  const session = sessionStore.get(token);
-  if (!session) return null;
-  if (Date.now() - session.createdAt > SESSION_TTL_MS) {
-    sessionStore.delete(token);
-    return null;
+async function getSession(token: string): Promise<Session | null> {
+  // Try in-memory first (fast path)
+  const mem = sessionStore.get(token);
+  if (mem) {
+    if (Date.now() - mem.createdAt > SESSION_TTL_MS) {
+      sessionStore.delete(token);
+      if (supabase) await supabase.from("sessions").delete().eq("token", token).catch(() => {});
+      return null;
+    }
+    mem.createdAt = Date.now();
+    return mem;
   }
-  // Refresh TTL on activity
-  session.createdAt = Date.now();
-  return session;
+  // Fallback: check Supabase (handles server restarts)
+  if (supabase) {
+    const { data } = await supabase.from("sessions").select("*").eq("token", token).single().catch(() => ({ data: null }));
+    if (!data) return null;
+    if (new Date(data.expires_at).getTime() < Date.now()) {
+      await supabase.from("sessions").delete().eq("token", token).catch(() => {});
+      return null;
+    }
+    const session: Session = { role: data.role, name: data.name, employeeId: data.employee_id, createdAt: new Date(data.created_at).getTime() };
+    sessionStore.set(token, session); // cache in memory
+    return session;
+  }
+  return null;
+}
+
+// ─── Rate limiter — 5 attempts per IP per 15 min ─────────────────────────────
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT = 5;
+const RATE_WINDOW_MS = 15 * 60 * 1000;
+
+export function checkRateLimit(ip: string): { allowed: boolean; retryAfterSecs: number } {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return { allowed: true, retryAfterSecs: 0 };
+  }
+  if (entry.count >= RATE_LIMIT) {
+    return { allowed: false, retryAfterSecs: Math.ceil((entry.resetAt - now) / 1000) };
+  }
+  entry.count++;
+  return { allowed: true, retryAfterSecs: 0 };
+}
+
+export function resetRateLimit(ip: string): void {
+  loginAttempts.delete(ip);
 }
 
 // ─── Public paths that skip auth ─────────────────────────────────────────────
@@ -75,58 +127,34 @@ function deriveModule(path: string, method: string): string {
 }
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
-export function roleAuthMiddleware(req: Request, res: Response, next: NextFunction) {
-  // Strip /api prefix for matching
+export async function roleAuthMiddleware(req: Request, res: Response, next: NextFunction) {
   const cleanPath = req.path.replace(/^\/api/, "");
 
-  // Allow public paths without a session
-  if (PUBLIC_PATHS.has(cleanPath) || PUBLIC_PATHS.has(req.path)) {
-    return next();
-  }
-
-  // Also allow the forbidden-alert broadcast endpoint (called by frontend before redirect)
-  if (req.path === "/auth/forbidden-alert" || cleanPath === "/auth/forbidden-alert") {
-    return next();
-  }
-
-  // Mobile portal: allow GET on menu-browsing paths and POST /orders from QR checkout
+  if (PUBLIC_PATHS.has(cleanPath) || PUBLIC_PATHS.has(req.path)) return next();
+  if (req.path === "/auth/forbidden-alert" || cleanPath === "/auth/forbidden-alert") return next();
   if (req.method === "GET" && isPublicMobilePath(req.path)) return next();
   if (req.method === "POST" && req.path === "/orders" && !req.header("X-Session-Token")) return next();
 
-  // ── Validate session token ──────────────────────────────────────────────────
   const token = req.header("X-Session-Token") || "";
-  const session = token ? getSession(token) : null;
+  const session = token ? await getSession(token) : null;
 
-  if (!session) {
-    return res.status(401).json({ error: "Unauthorized: invalid or expired session." });
-  }
+  if (!session) return res.status(401).json({ error: "Unauthorized: invalid or expired session." });
 
+  (req as any).session = session;
   const { role } = session;
 
-  // Attach session to request for downstream handlers
-  (req as any).session = session;
-
-  // Admin has unrestricted access
   if (role === "Admin") return next();
 
-  // ── Employee RBAC enforcement ───────────────────────────────────────────────
-  const permissions: Record<string, Record<string, string>> =
-    (db.settings as any)?.permissions?.[role] || {};
-
+  const permissions: Record<string, Record<string, string>> = (db.settings as any)?.permissions?.[role] || {};
   const pathModule = deriveModule(req.path, req.method);
   const access = (permissions as any)[pathModule] || "Full Access";
 
   if (access === "Hidden") {
-    broadcast({
-      type: "FORBIDDEN_ACCESS_ATTEMPT",
-      payload: { path: req.path, role, timestamp: new Date().toISOString() },
-    });
+    broadcast({ type: "FORBIDDEN_ACCESS_ATTEMPT", payload: { path: req.path, role, timestamp: new Date().toISOString() } });
     return res.status(403).json({ error: "403 Forbidden: Module access is hidden." });
   }
-
   if (access === "Read-Only" && ["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) {
     return res.status(403).json({ error: "403 Forbidden: Read-Only access cannot modify data." });
   }
-
   next();
 }

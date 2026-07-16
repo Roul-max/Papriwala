@@ -1,36 +1,39 @@
 import { useEffect, useState } from "react";
-import { IndianRupee, TrendingUp, ShoppingBag, Users, Package, ArrowRight } from "lucide-react";
+import { IndianRupee, ClipboardList, BoxesIcon, BarChart3, AlertTriangle, XOctagon, Users, Package, TrendingUp, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../../lib/apiFetch";
 
 export default function AdminDashboard() {
   const [analytics, setAnalytics] = useState<any>(null);
-  const [dealers, setDealers] = useState<any[]>([]);
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
+  const [totalUnitsSold, setTotalUnitsSold] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       apiFetch("/api/analytics").then(r => r.json()),
-      apiFetch("/api/dealers").then(r => r.json()),
       apiFetch("/api/orders").then(r => r.json()),
-    ]).then(([a, d, o]) => {
+    ]).then(([a, o]) => {
       setAnalytics(a);
-      setDealers(d);
       setRecentOrders(o.slice(0, 5));
+      // Total product units sold today (sum of all item qtys in today's paid orders)
+      const today = new Date().toISOString().split("T")[0];
+      const units = o
+        .filter((ord: any) => ord.order_status === "Paid" && ord.timestamp?.startsWith(today))
+        .reduce((sum: number, ord: any) => sum + (ord.items?.reduce((s: number, it: any) => s + (it.qty || 1), 0) || 0), 0);
+      setTotalUnitsSold(units);
       setLoading(false);
     });
   }, []);
 
-  const fmt = (n: number) =>
-    n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` : n >= 1000 ? `₹${(n / 1000).toFixed(1)}K` : `₹${n}`;
-
   const cards = analytics
     ? [
-        { title: "Today's Revenue", value: fmt(analytics.totalRevenue), icon: IndianRupee, sub: `${analytics.totalSales} paid orders`, color: "text-green-600 bg-green-50" },
-        { title: "Total Orders Today", value: analytics.totalOrders, icon: ShoppingBag, sub: "All pipeline states", color: "text-blue-600 bg-blue-50" },
-        { title: "Total Dealers", value: dealers.length, icon: Users, sub: "Active suppliers", color: "text-purple-600 bg-purple-50" },
-        { title: "Total Products", value: analytics.totalProducts, icon: Package, sub: `${analytics.lowStock} low · ${analytics.outOfStock} out`, color: "text-maroon bg-cream" },
+        { title: "Today's Sales",     value: analytics.totalSales,    icon: IndianRupee,   color: "text-green-600 bg-green-50" },
+        { title: "Today's Orders",    value: analytics.totalOrders,   icon: ClipboardList, color: "text-blue-600 bg-blue-50" },
+        { title: "Total Products",    value: analytics.totalProducts, icon: BoxesIcon,     color: "text-purple-600 bg-purple-50" },
+        { title: "Total Product Sale",value: totalUnitsSold,          icon: BarChart3,     color: "text-maroon bg-cream" },
+        { title: "Low Stock Items",   value: analytics.lowStock,      icon: AlertTriangle, color: "text-amber-600 bg-amber-50" },
+        { title: "Out of Stock Items",value: analytics.outOfStock,    icon: XOctagon,      color: "text-red-600 bg-red-50" },
       ]
     : [];
 
@@ -44,23 +47,20 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6">
       {/* Metric Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {loading
-          ? Array(4).fill(0).map((_, i) => (
-              <div key={i} className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 animate-pulse h-32" />
+          ? Array(6).fill(0).map((_, i) => (
+              <div key={i} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 animate-pulse h-20" />
             ))
           : cards.map((card, i) => (
-              <div key={i} className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col">
-                {card.icon && (
-                  <div className="flex justify-between items-start mb-4">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${card.color}`}>
-                      <card.icon size={24} />
-                    </div>
-                  </div>
-                )}
-                <h3 className="text-gray-500 text-sm font-medium">{card.title}</h3>
-                <p className="text-2xl font-bold text-gray-800 mt-1">{card.value}</p>
-                <p className="text-xs text-gray-400 mt-1">{card.sub}</p>
+              <div key={i} className="bg-white px-4 py-3 rounded-lg shadow-sm border border-gray-100 flex items-center gap-3">
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${card.color}`}>
+                  <card.icon size={18} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-lg font-bold text-gray-800 leading-none">{card.value}</p>
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">{card.title}</p>
+                </div>
               </div>
             ))}
       </div>

@@ -6,7 +6,7 @@ import { apiFetch } from "../../lib/apiFetch";
 type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; };
 type LogEntry = { id: string; type: "STOCK_IN" | "STOCK_OUT"; product_name: string; qty: number; reason: string; operator: string; timestamp: string; };
 
-const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5" };
+const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs" };
 
 export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -262,6 +262,7 @@ export default function Inventory() {
                 { label: "Product Name", key: "name", type: "text" },
                 { label: "SKU Code", key: "sku", type: "text" },
                 { label: "Category", key: "category", type: "text" },
+                { label: "Unit (e.g. kg, pcs, ltr)", key: "unit", type: "text" },
                 { label: "Purchase Cost (₹)", key: "unit_purchase_cost", type: "number" },
                 { label: "Selling Price (₹)", key: "price", type: "number" },
                 { label: "Initial Quantity", key: "current_stock_qty", type: "number" },

@@ -6,10 +6,12 @@ import { useAccess } from "../../hooks/useAccess";
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
 export default function DealerExpenses() {
+  const [tab, setTab] = useState<"overview" | "rawmat">("overview");
   const [dealers, setDealers] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [rawPurchases, setRawPurchases] = useState<any[]>([]);
 
   const [showDealerModal, setShowDealerModal] = useState(false);
   const [dealerForm, setDealerForm] = useState({ name: "", address: "", gstin: "", phone: "" });
@@ -18,6 +20,10 @@ export default function DealerExpenses() {
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [expenseForm, setExpenseForm] = useState({ expense_code: "EXP_RAW_MATERIAL", amount: "", dealer_id: "", description: "" });
   const [expenseError, setExpenseError] = useState("");
+
+  const [showRawModal, setShowRawModal] = useState(false);
+  const [rawForm, setRawForm] = useState({ material_name: "", qty: "", unit: "kg", rate_per_unit: "", dealer_id: "", notes: "" });
+  const [rawError, setRawError] = useState("");
 
   const access = useAccess("Financial Reports");
   const isReadOnly = access === "Read-Only";
@@ -28,7 +34,8 @@ export default function DealerExpenses() {
       apiFetch("/api/expenses").then(r => r.json()).catch(() => []),
       apiFetch("/api/orders").then(r => r.json()).catch(() => []),
       apiFetch("/api/products").then(r => r.json()).catch(() => []),
-    ]).then(([d, e, o, p]) => { setDealers(d); setExpenses(e); setOrders(o); setProducts(p); });
+      apiFetch("/api/raw-material-purchases").then(r => r.json()).catch(() => []),
+    ]).then(([d, e, o, p, rm]) => { setDealers(d); setExpenses(e); setOrders(o); setProducts(p); setRawPurchases(Array.isArray(rm) ? rm : []); });
   };
 
   useEffect(() => { fetchAll(); }, []);
@@ -76,6 +83,19 @@ export default function DealerExpenses() {
     fetchAll();
   };
 
+  const handleAddRawPurchase = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRawError("");
+    if (!rawForm.material_name || !rawForm.qty || !rawForm.rate_per_unit) { setRawError("Fill all required fields."); return; }
+    await apiFetch("/api/raw-material-purchases", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...rawForm, qty: Number(rawForm.qty), rate_per_unit: Number(rawForm.rate_per_unit), dealer_id: rawForm.dealer_id || null })
+    });
+    setShowRawModal(false);
+    setRawForm({ material_name: "", qty: "", unit: "kg", rate_per_unit: "", dealer_id: "", notes: "" });
+    fetchAll();
+  };
+
   const expenseCodeLabel: Record<string, string> = {
     EXP_RAW_MATERIAL: "Raw Material",
     EXP_SALARY_DRAW: "Salary Draw",
@@ -84,6 +104,58 @@ export default function DealerExpenses() {
 
   return (
     <div className="space-y-6 flex flex-col h-full">
+      {/* Tab switcher */}
+      <div className="flex gap-2">
+        <button onClick={() => setTab("overview")} className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${tab === "overview" ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>Dealer & Expenses</button>
+        <button onClick={() => setTab("rawmat")} className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${tab === "rawmat" ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>Raw Material Purchases</button>
+      </div>
+
+      {tab === "rawmat" && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-100 flex flex-col">
+          <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+            <h3 className="font-bold text-gray-800">Raw Material Purchase Log</h3>
+            {!isReadOnly && (
+              <button onClick={() => { setShowRawModal(true); setRawError(""); }}
+                className="bg-maroon hover:bg-maroon-light text-white px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1">
+                <Plus size={14} /> Log Purchase
+              </button>
+            )}
+          </div>
+          <div className="overflow-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4">Material</th>
+                  <th className="py-3 px-4">Qty</th>
+                  <th className="py-3 px-4">Unit</th>
+                  <th className="py-3 px-4">Rate/Unit</th>
+                  <th className="py-3 px-4">Total</th>
+                  <th className="py-3 px-4">Dealer</th>
+                  <th className="py-3 px-4">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rawPurchases.map((r: any) => (
+                  <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-3 px-4 text-gray-500 text-xs">{new Date(r.purchase_date).toLocaleDateString()}</td>
+                    <td className="py-3 px-4 font-bold text-gray-800">{r.material_name}</td>
+                    <td className="py-3 px-4">{r.qty}</td>
+                    <td className="py-3 px-4 text-gray-500">{r.unit}</td>
+                    <td className="py-3 px-4">₹{Number(r.rate_per_unit).toFixed(2)}</td>
+                    <td className="py-3 px-4 font-bold">₹{(r.qty * r.rate_per_unit).toFixed(2)}</td>
+                    <td className="py-3 px-4 text-gray-500 text-xs">{dealers.find(d => d.id === r.dealer_id)?.name || "—"}</td>
+                    <td className="py-3 px-4 text-gray-400 text-xs">{r.notes || "—"}</td>
+                  </tr>
+                ))}
+                {rawPurchases.length === 0 && <tr><td colSpan={8} className="py-8 text-center text-gray-400 italic">No raw material purchases recorded.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === "overview" && (<>
       {/* Balance Sheet Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 border-l-4 border-l-green-500">
@@ -203,6 +275,59 @@ export default function DealerExpenses() {
           </div>
         </div>
       </div>
+
+      </>)}
+
+      {/* Add Raw Material Purchase Modal */}
+      {showRawModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl">
+              <h3 className="font-bold text-maroon text-lg">Log Raw Material Purchase</h3>
+              <button onClick={() => setShowRawModal(false)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+            </div>
+            <form onSubmit={handleAddRawPurchase} className="p-5 space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Material Name</label>
+                <input type="text" required value={rawForm.material_name} onChange={e => setRawForm(p => ({ ...p, material_name: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">Qty</label>
+                  <input type="number" min="0.01" step="0.01" required value={rawForm.qty} onChange={e => setRawForm(p => ({ ...p, qty: e.target.value }))}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">Unit</label>
+                  <input type="text" value={rawForm.unit} onChange={e => setRawForm(p => ({ ...p, unit: e.target.value }))}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" placeholder="kg, ltr, pcs" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">Rate/Unit (₹)</label>
+                  <input type="number" min="0" step="0.01" required value={rawForm.rate_per_unit} onChange={e => setRawForm(p => ({ ...p, rate_per_unit: e.target.value }))}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Dealer (optional)</label>
+                <select value={rawForm.dealer_id} onChange={e => setRawForm(p => ({ ...p, dealer_id: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
+                  <option value="">— Select Dealer —</option>
+                  {dealers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Notes</label>
+                <input type="text" value={rawForm.notes} onChange={e => setRawForm(p => ({ ...p, notes: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              {rawError && <p className="text-red-500 text-sm">{rawError}</p>}
+              <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">Log Purchase</button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Add Dealer Modal */}
       {showDealerModal && (

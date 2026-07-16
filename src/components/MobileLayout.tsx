@@ -50,10 +50,7 @@ export default function MobileLayout() {
         <button onClick={() => setSidebarOpen(true)} className="p-1">
           <Menu size={24} />
         </button>
-        <div className="flex flex-col items-center">
-          <h1 className="font-serif text-lg text-gold font-bold leading-none">SHRI BADRINARAYAN</h1>
-          <p className="text-[8px] tracking-[0.2em] uppercase mt-1">Papriwale</p>
-        </div>
+        <img src="/Logo.png" alt="Logo" className="w-12 h-12 object-contain absolute left-1/2 -translate-x-1/2" />
         <div className="flex items-center space-x-3">
           <Link to="/orders" className="p-1 relative">
             <Bell size={20} />
@@ -104,11 +101,10 @@ export default function MobileLayout() {
               <button onClick={() => setSidebarOpen(false)} className="absolute top-4 right-4 text-cream/70 hover:text-white">
                 <X size={24} />
               </button>
-              <div className="w-16 h-16 rounded-full border-2 border-gold mx-auto mb-3 overflow-hidden">
-                <img src="https://images.unsplash.com/photo-1559564104-e3c79a528c0b?auto=format&fit=crop&q=80&w=100" alt="Logo" className="w-full h-full object-cover" />
+              <div className="w-24 h-24 rounded-full border-2 border-gold mx-auto mb-3 overflow-hidden bg-white">
+                <img src="/Logo.png" alt="Logo" className="w-full h-full object-contain p-1" />
               </div>
-              <h1 className="font-serif text-base text-gold font-bold">SHRI BADRINARAYAN</h1>
-              <p className="text-[10px] text-cream/70 mt-1 uppercase tracking-widest">Papriwale</p>
+              <p className="text-[10px] text-cream/70 mt-2 uppercase tracking-widest">SWEETS | NAMKEEN | BAKERY</p>
             </div>
             
             <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1">

@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation, Navigate, useNavigate } from "react-router-dom";
-import { Search, Bell, Settings, User, ShoppingCart, Package, List, Users, FileText, Star, AlertTriangle, X, ExternalLink, LayoutDashboard } from "lucide-react";
+import { Search, Bell, Settings, User, ShoppingCart, Package, List, Users, FileText, Star, AlertTriangle, X, ExternalLink, LayoutDashboard, Image } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { apiFetch } from "../lib/apiFetch";
 
@@ -204,8 +204,8 @@ export default function AdminLayout() {
       {/* Sidebar */}
       <aside className="w-64 bg-maroon text-cream-light flex flex-col fixed h-full z-10">
         <div className="p-6 text-center border-b border-maroon-light">
-          <div className="w-20 h-20 rounded-full border-2 border-gold mx-auto mb-3 flex items-center justify-center bg-cream-light text-maroon font-serif font-bold text-xl overflow-hidden">
-            <img src="https://images.unsplash.com/photo-1559564104-e3c79a528c0b?auto=format&fit=crop&q=80&w=100" alt="Logo" className="w-full h-full object-cover opacity-80" />
+          <div className="w-20 h-20 rounded-full border-2 border-gold mx-auto mb-3 flex items-center justify-center bg-cream-light overflow-hidden">
+            <img src="/Logo.png" alt="Logo" className="w-full h-full object-contain p-1" />
           </div>
           <h1 className="font-serif text-lg text-gold font-bold leading-tight">SHRI BADRINARAYAN</h1>
           <p className="text-xs tracking-widest uppercase mt-1">Papriwale</p>

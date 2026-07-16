@@ -160,6 +160,60 @@ insert into categories (id, name, image) values
   ('c5','Snacks','https://images.unsplash.com/photo-1625220194771-7ebdea0b70b9?auto=format&fit=crop&q=80&w=400')
 on conflict (id) do nothing;
 
+-- 11. Employee Sessions
+create table if not exists employee_sessions (
+  id text primary key,
+  employee_id text references employees(id) on delete cascade,
+  login_time timestamptz default now(),
+  logout_time timestamptz,
+  session_token text
+);
+
+-- 15. Auth Sessions (persistent login tokens — survives server restarts)
+create table if not exists sessions (
+  token text primary key,
+  role text not null,
+  name text not null,
+  employee_id text,
+  created_at timestamptz default now(),
+  expires_at timestamptz not null
+);
+alter table sessions disable row level security;
+
+-- 12. Raw Material Purchases
+create table if not exists raw_material_purchases (
+  id text primary key,
+  material_name text not null,
+  qty decimal(10,2) not null,
+  unit text default 'kg',
+  rate_per_unit decimal(10,2) not null,
+  dealer_id text references dealers(id) on delete set null,
+  notes text,
+  purchase_date timestamptz default now()
+);
+
+-- 13. Reviews
+create table if not exists reviews (
+  id text primary key,
+  author text not null,
+  rating integer check (rating between 1 and 5),
+  text text not null,
+  created_at timestamptz default now()
+);
+
+-- 14. Gallery
+create table if not exists gallery (
+  id text primary key,
+  title text not null,
+  url text not null
+);
+
+-- Also add unit column to products if not exists
+alter table products add column if not exists unit text default 'pcs';
+-- Also add created_by column to orders if not exists
+alter table orders add column if not exists created_by text;
+alter table orders add column if not exists payment_mode text;
+
 -- Disable RLS on all tables (service_role key bypasses anyway, but this prevents 401s)
 alter table products        disable row level security;
 alter table product_variants disable row level security;
@@ -171,3 +225,7 @@ alter table orders          disable row level security;
 alter table inventory_log   disable row level security;
 alter table categories      disable row level security;
 alter table settings        disable row level security;
+alter table employee_sessions    disable row level security;
+alter table raw_material_purchases disable row level security;
+alter table reviews         disable row level security;
+alter table gallery         disable row level security;

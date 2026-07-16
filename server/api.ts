@@ -1,4 +1,4 @@
-import { roleAuthMiddleware, createSession, destroySession } from "./middleware.js";
+import { roleAuthMiddleware, createSession, destroySession, checkRateLimit, resetRateLimit } from "./middleware.js";
 import { Router } from "express";
 import { db, supabase, dbSelect, dbInsert, dbUpdate, dbDelete } from "./db.js";
 import { broadcast } from "./ws.js";
@@ -69,7 +69,8 @@ router.get("/orders", async (req, res) => {
 });
 
 router.post("/orders", async (req, res) => {
-  const orderId = `INV-2026-${Math.floor(10000 + Math.random() * 90000)}`;
+  const ts = Date.now();
+  const orderId = `INV-${new Date().getFullYear()}-${ts.toString().slice(-6)}`;
   const newOrder = { ...req.body, id: orderId, timestamp: new Date().toISOString() };
   const saved = await dbInsert("orders", newOrder, db.orders);
   broadcast({ type: "INBOUND_QR_ORDER", payload: { order_id: saved.id, table_number: saved.table_id || "Delivery", bill_amount: saved.grand_total } });
@@ -205,10 +206,21 @@ router.post("/auth/change-password", async (req, res) => {
   if (!current_pass || !new_pass) return res.status(400).json({ error: "Missing fields" });
   const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}/;
   if (!passRegex.test(new_pass)) return res.status(400).json({ error: "Password does not meet complexity requirements" });
-  const isMatch = db.adminPasswordHash
-    ? await bcrypt.compare(current_pass, db.adminPasswordHash)
-    : current_pass === "Admin@1234";
+  if (!db.adminPasswordHash) return res.status(400).json({ error: "No password set yet. Use /auth/set-password to initialise." });
+  const isMatch = await bcrypt.compare(current_pass, db.adminPasswordHash);
   if (!isMatch) return res.status(401).json({ error: "Current password is incorrect" });
+  const hashed = await bcrypt.hash(new_pass, 12);
+  db.adminPasswordHash = hashed;
+  if (supabase) await supabase.from("settings").upsert({ id: 1, value: { ...db.settings, adminPasswordHash: hashed } });
+  res.json({ success: true });
+});
+
+// ─── First-time password setup (only works when no password is set yet) ───────
+router.post("/auth/set-password", async (req, res) => {
+  if (db.adminPasswordHash) return res.status(403).json({ error: "Password already set. Use change-password instead." });
+  const { new_pass } = req.body;
+  const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}/;
+  if (!new_pass || !passRegex.test(new_pass)) return res.status(400).json({ error: "Password must be 8+ chars with upper, lower, number and special character." });
   const hashed = await bcrypt.hash(new_pass, 12);
   db.adminPasswordHash = hashed;
   if (supabase) await supabase.from("settings").upsert({ id: 1, value: { ...db.settings, adminPasswordHash: hashed } });
@@ -222,18 +234,22 @@ router.post("/auth/forbidden-alert", (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── Login — issues a server-side session token ───────────────────────────────
+// ─── Login ────────────────────────────────────────────────────────────────────
 router.post("/auth/login", async (req, res) => {
+  const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "unknown";
+  const { allowed, retryAfterSecs } = checkRateLimit(ip);
+  if (!allowed) return res.status(429).json({ error: `Too many attempts. Try again in ${Math.ceil(retryAfterSecs / 60)} min.` });
+
   const { username, password, role } = req.body;
   const u = (username ?? "").trim();
   const p = (password ?? "").trim();
 
   if (role === "Admin" && u === "admin") {
-    const isMatch = db.adminPasswordHash
-      ? await bcrypt.compare(p, db.adminPasswordHash)
-      : p === "Admin@1234";
+    if (!db.adminPasswordHash) return res.status(401).json({ error: "Admin password not set. Please set it first." });
+    const isMatch = await bcrypt.compare(p, db.adminPasswordHash);
     if (isMatch) {
-      const token = createSession("Admin", "Super Admin");
+      resetRateLimit(ip);
+      const token = await createSession("Admin", "Super Admin");
       return res.json({ success: true, role: "Admin", name: "Super Admin", sessionToken: token });
     }
   }
@@ -242,15 +258,15 @@ router.post("/auth/login", async (req, res) => {
     const employees = await dbSelect("employees", db.employees);
     const emp = employees.find((e: any) => e.name?.toLowerCase() === u.toLowerCase() && e.phone_number === p);
     if (emp) {
-      const settings = db.settings;
-      const token = createSession(emp.designation_tag, emp.name, emp.id);
+      resetRateLimit(ip);
+      const token = await createSession(emp.designation_tag, emp.name, emp.id);
+      if (!db.employee_sessions) db.employee_sessions = [];
+      const sess = { id: crypto.randomUUID(), employee_id: emp.id, login_time: new Date().toISOString(), logout_time: null, session_token: token };
+      await dbInsert("employee_sessions", sess, db.employee_sessions);
       return res.json({
-        success: true,
-        role: emp.designation_tag,
-        name: emp.name,
-        employee_id: emp.id,
-        avatar: emp.avatar || null,
-        permissions: settings?.permissions?.[emp.designation_tag] || {},
+        success: true, role: emp.designation_tag, name: emp.name,
+        employee_id: emp.id, avatar: emp.avatar || null,
+        permissions: db.settings?.permissions?.[emp.designation_tag] || {},
         sessionToken: token,
       });
     }
@@ -259,10 +275,19 @@ router.post("/auth/login", async (req, res) => {
   res.status(401).json({ error: "Invalid credentials" });
 });
 
-// ─── Logout — destroys the server-side session ───────────────────────────────
-router.post("/auth/logout", (req, res) => {
+// ─── Logout ───────────────────────────────────────────────────────────────────
+router.post("/auth/logout", async (req, res) => {
   const token = req.header("X-Session-Token") || "";
-  if (token) destroySession(token);
+  if (token) {
+    await destroySession(token);
+    if (db.employee_sessions) {
+      const s = db.employee_sessions.find((s: any) => s.session_token === token && !s.logout_time);
+      if (s) {
+        s.logout_time = new Date().toISOString();
+        if (supabase) await supabase.from("employee_sessions").update({ logout_time: s.logout_time }).eq("session_token", token).catch(() => {});
+      }
+    }
+  }
   res.json({ success: true });
 });
 
@@ -295,7 +320,7 @@ router.post("/auth/verify-otp", async (req, res) => {
   const emp = employees.find((e: any) => e.id === entry.employeeId);
   if (!emp) return res.status(404).json({ error: "Employee not found" });
   const settings = db.settings;
-  const token = createSession(emp.designation_tag, emp.name, emp.id);
+  const token = await createSession(emp.designation_tag, emp.name, emp.id);
   res.json({ success: true, role: emp.designation_tag, name: emp.name, employee_id: emp.id, permissions: settings?.permissions?.[emp.designation_tag] || {}, sessionToken: token });
 });
 
@@ -307,6 +332,70 @@ router.post("/dealers/:id/invoice-due", async (req, res) => {
   const { amount_due, expiry_date } = req.body;
   broadcast({ type: "DEALER_INVOICE_DUE", payload: { dealer_id: dealer.id, dealer_name: dealer.name, amount_due, expiry_date } });
   res.json({ ok: true });
+});
+
+// ─── Raw Material Purchases ─────────────────────────────────────────────────
+router.get("/raw-material-purchases", async (req, res) => {
+  if (!db.raw_material_purchases) db.raw_material_purchases = [];
+  res.json(await dbSelect("raw_material_purchases", db.raw_material_purchases));
+});
+
+router.post("/raw-material-purchases", async (req, res) => {
+  if (!db.raw_material_purchases) db.raw_material_purchases = [];
+  const entry = { id: crypto.randomUUID(), ...req.body, purchase_date: new Date().toISOString() };
+  res.json(await dbInsert("raw_material_purchases", entry, db.raw_material_purchases));
+});
+
+// ─── Employee Sessions ────────────────────────────────────────────────────────
+router.get("/employee-sessions", async (req, res) => {
+  if (!db.employee_sessions) db.employee_sessions = [];
+  const all = await dbSelect("employee_sessions", db.employee_sessions);
+  res.json(all.sort((a: any, b: any) => new Date(b.login_time).getTime() - new Date(a.login_time).getTime()));
+});
+
+// ─── Reviews ─────────────────────────────────────────────────────────────────
+router.get("/reviews", async (req, res) => {
+  if (!db.reviews) db.reviews = [];
+  const all = await dbSelect("reviews", db.reviews);
+  res.json(all.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+});
+
+router.post("/reviews", async (req, res) => {
+  if (!db.reviews) db.reviews = [];
+  const { author, rating, text } = req.body;
+  if (!author || !rating || !text) return res.status(400).json({ error: "author, rating and text are required" });
+  const entry = { id: crypto.randomUUID(), author, rating: Number(rating), text, created_at: new Date().toISOString() };
+  res.json(await dbInsert("reviews", entry, db.reviews));
+});
+
+router.delete("/reviews/:id", async (req, res) => {
+  if (!db.reviews) db.reviews = [];
+  await dbDelete("reviews", req.params.id);
+  const idx = db.reviews.findIndex((r: any) => r.id === req.params.id);
+  if (idx !== -1) db.reviews.splice(idx, 1);
+  res.json({ success: true });
+});
+
+// ─── Gallery ──────────────────────────────────────────────────────────────────
+router.get("/gallery", async (req, res) => {
+  if (!db.gallery) db.gallery = [];
+  res.json(await dbSelect("gallery", db.gallery));
+});
+
+router.post("/gallery", async (req, res) => {
+  if (!db.gallery) db.gallery = [];
+  const { title, url } = req.body;
+  if (!title || !url) return res.status(400).json({ error: "title and url are required" });
+  const entry = { id: crypto.randomUUID(), title, url };
+  res.json(await dbInsert("gallery", entry, db.gallery));
+});
+
+router.delete("/gallery/:id", async (req, res) => {
+  if (!db.gallery) db.gallery = [];
+  await dbDelete("gallery", req.params.id);
+  const idx = db.gallery.findIndex((g: any) => g.id === req.params.id);
+  if (idx !== -1) db.gallery.splice(idx, 1);
+  res.json({ success: true });
 });
 
 // ─── Product Variants ────────────────────────────────────────────────────────

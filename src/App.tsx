@@ -27,9 +27,11 @@ import AdminEmployee from "./pages/admin/Employee";
 import AdminReport from "./pages/admin/Report";
 import DealerExpenses from "./pages/admin/Dealer";
 import AdminReviews from "./pages/admin/Reviews";
+import AdminGallery from "./pages/admin/Gallery";
 import AdminSettings from "./pages/admin/Settings";
 import AdminProfile from "./pages/admin/Profile";
 import { CartProvider } from "./hooks/useCart";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 // §2.6.1 Route-to-module mapping for permission enforcement
 const ROUTE_MODULE_MAP: Record<string, string> = {
@@ -103,17 +105,18 @@ export default function App() {
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin" element={<RequireAuth><AdminLayout /></RequireAuth>}>
           <Route index element={<RoleHomeRedirect />} />
-          <Route path="dashboard" element={<AdminDashboard />} />
-          <Route path="pos" element={<PermissionGuard module="POS Billing"><POS /></PermissionGuard>} />
-          <Route path="inventory" element={<PermissionGuard module="Inventory"><Inventory /></PermissionGuard>} />
-          <Route path="orders" element={<PermissionGuard module="Orders"><AdminOrders /></PermissionGuard>} />
-          <Route path="categories" element={<PermissionGuard module="Inventory"><AdminCategories /></PermissionGuard>} />
-          <Route path="employee" element={<PermissionGuard module="Orders"><AdminEmployee /></PermissionGuard>} />
-          <Route path="report" element={<PermissionGuard module="Financial Reports"><AdminReport /></PermissionGuard>} />
-          <Route path="dealer" element={<PermissionGuard module="Financial Reports"><DealerExpenses /></PermissionGuard>} />
-          <Route path="reviews" element={<AdminReviews />} />
-          <Route path="settings" element={<PermissionGuard module="Settings"><AdminSettings /></PermissionGuard>} />
-          <Route path="profile" element={<AdminProfile />} />
+          <Route path="dashboard" element={<ErrorBoundary><AdminDashboard /></ErrorBoundary>} />
+          <Route path="pos" element={<PermissionGuard module="POS Billing"><ErrorBoundary><POS /></ErrorBoundary></PermissionGuard>} />
+          <Route path="inventory" element={<PermissionGuard module="Inventory"><ErrorBoundary><Inventory /></ErrorBoundary></PermissionGuard>} />
+          <Route path="orders" element={<PermissionGuard module="Orders"><ErrorBoundary><AdminOrders /></ErrorBoundary></PermissionGuard>} />
+          <Route path="categories" element={<PermissionGuard module="Inventory"><ErrorBoundary><AdminCategories /></ErrorBoundary></PermissionGuard>} />
+          <Route path="employee" element={<PermissionGuard module="Orders"><ErrorBoundary><AdminEmployee /></ErrorBoundary></PermissionGuard>} />
+          <Route path="report" element={<PermissionGuard module="Financial Reports"><ErrorBoundary><AdminReport /></ErrorBoundary></PermissionGuard>} />
+          <Route path="dealer" element={<PermissionGuard module="Financial Reports"><ErrorBoundary><DealerExpenses /></ErrorBoundary></PermissionGuard>} />
+          <Route path="reviews" element={<ErrorBoundary><AdminReviews /></ErrorBoundary>} />
+          <Route path="gallery" element={<ErrorBoundary><AdminGallery /></ErrorBoundary>} />
+          <Route path="settings" element={<PermissionGuard module="Settings"><ErrorBoundary><AdminSettings /></ErrorBoundary></PermissionGuard>} />
+          <Route path="profile" element={<ErrorBoundary><AdminProfile /></ErrorBoundary>} />
         </Route>
 
         {/* Mobile Portal Routes */}

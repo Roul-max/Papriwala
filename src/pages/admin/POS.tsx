@@ -20,9 +20,35 @@ export default function POS() {
   const [variantModal, setVariantModal] = useState<{ product: any; variants: any[] } | null>(null);
   const [variantSize, setVariantSize] = useState("");
   const [variantQty, setVariantQty] = useState(1);
+  const [variantCustomPrice, setVariantCustomPrice] = useState<number | "">("");
+  const [quickAddModal, setQuickAddModal] = useState<{ product: any } | null>(null);
+  const [quickQty, setQuickQty] = useState(1);
+  const [quickPrice, setQuickPrice] = useState<number>(0);
+  const [quickUnit, setQuickUnit] = useState("");
+  const [variantUnit, setVariantUnit] = useState("");
+  const [paymentMode, setPaymentMode] = useState("Cash");
+  const [totalUnitsSold, setTotalUnitsSold] = useState(0);
+  const [invoiceNo, setInvoiceNo] = useState("");
+
+  // Generate a stable invoice number once per billing session
+  const generateInvoiceNo = () => {
+    const ts = Date.now();
+    setInvoiceNo(`INV-${new Date().getFullYear()}-${ts.toString().slice(-6)}`);
+  };
 
   const access = useAccess("POS Billing");
   const isReadOnly = access === "Read-Only";
+
+  const refreshAnalytics = () => {
+    apiFetch("/api/analytics").then(res => res.json()).then(data => setAnalytics(data || analytics));
+    const today = new Date().toISOString().split("T")[0];
+    apiFetch("/api/orders").then(res => res.json()).then((orders: any[]) => {
+      const units = (Array.isArray(orders) ? orders : [])
+        .filter((o: any) => o.order_status === "Paid" && o.timestamp?.startsWith(today))
+        .reduce((sum: number, o: any) => sum + (o.items?.reduce((s: number, it: any) => s + (it.qty || 1), 0) || 0), 0);
+      setTotalUnitsSold(units);
+    });
+  };
 
   useEffect(() => {
     apiFetch("/api/products").then(res => res.json()).then(data => {
@@ -30,8 +56,9 @@ export default function POS() {
       setProducts(list);
       setFilteredProducts(list);
     });
-    apiFetch("/api/analytics").then(res => res.json()).then(data => setAnalytics(data || analytics));
+    refreshAnalytics();
     apiFetch("/api/product-variants").then(res => res.json()).then(data => setAllVariants(Array.isArray(data) ? data : []));
+    generateInvoiceNo();
   }, []);
 
   useEffect(() => {
@@ -46,37 +73,59 @@ export default function POS() {
 
   const categories = ["All", ...Array.from(new Set(products.map(p => p.category)))];
 
-  const addToCart = (product: any, size?: string, qty: number = 1) => {
-    const key = size ? `${product.id}-${size}` : product.id;
-    const price = size
-      ? (() => { const v = allVariants.find(v => v.product_id === product.id && v.size_label === size); return v ? product.price * v.variant_price_modifier : product.price; })()
-      : product.price;
-    setCart(prev => {
-      const existing = prev.find(item => item.id === key);
-      if (existing) return prev.map(item => item.id === key ? { ...item, qty: item.qty + qty } : item);
-      return [...prev, { ...product, id: key, product_id: product.id, size: size || "", price, qty }];
-    });
-  };
-
   const handleAddToBill = (product: any) => {
     const productVariants = allVariants.filter(v => v.product_id === product.id);
     if (productVariants.length > 0) {
       setVariantModal({ product, variants: productVariants });
       setVariantSize(productVariants[0].size_label);
       setVariantQty(1);
+      const defaultPrice = product.price * productVariants[0].variant_price_modifier;
+      setVariantCustomPrice(defaultPrice);
+      setVariantUnit(product.unit || "pcs");
     } else {
-      addToCart(product);
+      setQuickAddModal({ product });
+      setQuickQty(1);
+      setQuickPrice(product.price);
+      setQuickUnit(product.unit || "pcs");
     }
   };
 
   const confirmVariantAdd = () => {
     if (!variantModal) return;
-    addToCart(variantModal.product, variantSize, variantQty);
+    const finalPrice = variantCustomPrice !== "" ? Number(variantCustomPrice) : (() => {
+      const v = variantModal.variants.find(v => v.size_label === variantSize);
+      return v ? variantModal.product.price * v.variant_price_modifier : variantModal.product.price;
+    })();
+    const key = `${variantModal.product.id}-${variantSize}`;
+    setCart(prev => {
+      const existing = prev.find(item => item.id === key);
+      if (existing) return prev.map(item => item.id === key ? { ...item, qty: item.qty + variantQty, price: finalPrice } : item);
+      return [...prev, { ...variantModal.product, id: key, product_id: variantModal.product.id, size: variantSize, price: finalPrice, qty: variantQty, unit: variantUnit }];
+    });
     setVariantModal(null);
   };
 
-  const updateQty = (id: string, delta: number) => {
-    setCart(prev => prev.map(item => item.id === id ? { ...item, qty: Math.max(1, item.qty + delta) } : item));
+  const confirmQuickAdd = () => {
+    if (!quickAddModal) return;
+    const p = quickAddModal.product;
+    setCart(prev => {
+      const existing = prev.find(item => item.id === p.id);
+      if (existing) return prev.map(item => item.id === p.id ? { ...item, qty: item.qty + quickQty, price: quickPrice } : item);
+      return [...prev, { ...p, price: quickPrice, qty: quickQty, unit: quickUnit }];
+    });
+    setQuickAddModal(null);
+  };
+
+  const updateCartPrice = (id: string, price: number) => {
+    setCart(prev => prev.map(item => item.id === id ? { ...item, price: Math.max(0, price) } : item));
+  };
+
+  const updateCartQty = (id: string, qty: number) => {
+    setCart(prev => prev.map(item => item.id === id ? { ...item, qty: Math.max(1, qty) } : item));
+  };
+
+  const updateCartUnit = (id: string, unit: string) => {
+    setCart(prev => prev.map(item => item.id === id ? { ...item, unit } : item));
   };
 
   const removeFromCart = (id: string) => setCart(prev => prev.filter(item => item.id !== id));
@@ -88,80 +137,177 @@ export default function POS() {
   const taxes = (subtotal - discountTotal) * 0.05;
   const grandTotal = Math.max(0, (subtotal - discountTotal) + taxes + otherCharges);
 
+
   const handleExportPDF = () => {
     if (cart.length === 0) return;
     const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.setTextColor(92, 26, 27);
-    doc.text("SHRI BADRINARAYAN PAPRIWALE", 14, 20);
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text("Main Road, Buxar, Bihar | GSTIN: 10AAAAA0000A1Z5", 14, 28);
-    doc.text(`Date: ${new Date().toLocaleString()}`, 14, 35);
-    doc.setDrawColor(201, 162, 39);
-    doc.line(14, 39, 196, 39);
-    doc.setFontSize(11);
-    doc.setTextColor(30);
-    let y = 47;
-    doc.setFont(undefined as any, "bold");
-    doc.text("Item", 14, y); doc.text("Qty", 130, y); doc.text("Amount", 165, y);
-    doc.setFont(undefined as any, "normal");
-    y += 6;
-    doc.line(14, y, 196, y); y += 6;
-    cart.forEach(item => {
-      doc.text(item.name + (item.size ? ` (${item.size})` : ""), 14, y);
-      doc.text(String(item.qty), 130, y);
-      doc.text(`Rs.${(item.price * item.qty).toFixed(2)}`, 165, y);
+    const pageW = 210;
+    const margin = 14;
+    const rightEdge = pageW - margin;
+
+    const buildPDF = (logoDataUrl?: string, imgW?: number, imgH?: number) => {
+      // ── Header background ──
+      doc.setFillColor(92, 26, 27);
+      doc.rect(0, 0, pageW, 38, "F");
+
+      // ── Logo (top-left, white box area) ──
+      if (logoDataUrl && imgW && imgH) {
+        try {
+          const maxW = 18, maxH = 18;
+          const ratio = Math.min(maxW / imgW, maxH / imgH);
+          doc.addImage(logoDataUrl, "PNG", margin, 10, imgW * ratio, imgH * ratio);
+        } catch {}
+      }
+
+      // ── Brand name & address (centered in header) ──
+      doc.setFont(undefined as any, "bold");
+      doc.setFontSize(15); doc.setTextColor(255, 255, 255);
+      doc.text("SHRI BADRINARAYAN PAPRIWALE", pageW / 2, 17, { align: "center" });
+      doc.setFont(undefined as any, "normal");
+      doc.setFontSize(8); doc.setTextColor(220, 200, 180);
+      doc.text("Main Road, Buxar, Bihar - 802101  |  GSTIN: 10AAAAA0000A1Z5  |  Ph: +91 9876543210", pageW / 2, 24, { align: "center" });
+
+      // ── TAX INVOICE label (gold, right-aligned in header) ──
+      doc.setFont(undefined as any, "bold");
+      doc.setFontSize(9); doc.setTextColor(201, 162, 39);
+      doc.text("TAX INVOICE", rightEdge, 33, { align: "right" });
+
+      // ── Gold divider ──
+      doc.setDrawColor(201, 162, 39); doc.setLineWidth(0.5);
+      doc.line(margin, 42, rightEdge, 42);
+
+      // ── Invoice meta (two columns) ──
+      doc.setFont(undefined as any, "normal"); doc.setFontSize(9); doc.setTextColor(60);
+      doc.setFont(undefined as any, "bold"); doc.text("Invoice No:", margin, 50);
+      doc.setFont(undefined as any, "normal"); doc.text(invoiceNo, margin + 24, 50);
+      doc.setFont(undefined as any, "bold"); doc.text("Date:", margin, 56);
+      doc.setFont(undefined as any, "normal"); doc.text(new Date().toLocaleString(), margin + 14, 56);
+      doc.setFont(undefined as any, "bold"); doc.text("Payment:", rightEdge - 50, 50);
+      doc.setFont(undefined as any, "normal"); doc.text(paymentMode, rightEdge - 50 + 22, 50);
+
+      doc.setDrawColor(220); doc.setLineWidth(0.3);
+      doc.line(margin, 61, rightEdge, 61);
+
+      // ── Table header ──
+      let y = 68;
+      doc.setFillColor(245, 245, 245);
+      doc.rect(margin, y - 5, rightEdge - margin, 8, "F");
+      doc.setFont(undefined as any, "bold"); doc.setFontSize(8); doc.setTextColor(80);
+      doc.text("#",    margin + 1, y);
+      doc.text("ITEM", margin + 8, y);
+      doc.text("UNIT", 110, y);
+      doc.text("QTY",  130, y);
+      doc.text("RATE", 148, y);
+      doc.text("AMOUNT", rightEdge, y, { align: "right" });
+      doc.setDrawColor(180); doc.setLineWidth(0.3);
+      doc.line(margin, y + 2, rightEdge, y + 2);
       y += 8;
-    });
-    doc.line(14, y, 196, y); y += 8;
-    doc.text(`Subtotal: Rs.${subtotal.toFixed(2)}`, 120, y); y += 7;
-    doc.text(`Discount: -Rs.${discountTotal.toFixed(2)}`, 120, y); y += 7;
-    doc.text(`Taxes (5%): Rs.${taxes.toFixed(2)}`, 120, y); y += 7;
-    doc.setFont(undefined as any, "bold");
-    doc.setTextColor(92, 26, 27);
-    doc.text(`Grand Total: Rs.${grandTotal.toFixed(2)}`, 120, y);
-    doc.setFontSize(9); doc.setTextColor(150); doc.setFont(undefined as any, "normal");
-    doc.text("Thank you for visiting! Have a sweet day.", 14, 285);
-    doc.save(`invoice-${Date.now()}.pdf`);
+
+      // ── Table rows ──
+      doc.setFont(undefined as any, "normal"); doc.setFontSize(9); doc.setTextColor(30);
+      cart.forEach((item, i) => {
+        if (i % 2 === 1) { doc.setFillColor(250, 250, 250); doc.rect(margin, y - 5, rightEdge - margin, 8, "F"); }
+        doc.text(String(i + 1), margin + 1, y);
+        const itemName = item.name + (item.size ? ` (${item.size})` : "");
+        doc.text(itemName.length > 32 ? itemName.slice(0, 31) + "…" : itemName, margin + 8, y);
+        doc.text(item.unit || "pcs", 110, y);
+        doc.text(String(item.qty), 130, y);
+        doc.text(`Rs.${item.price.toFixed(2)}`, 148, y);
+        doc.text(`Rs.${(item.price * item.qty).toFixed(2)}`, rightEdge, y, { align: "right" });
+        y += 8;
+      });
+
+      doc.setDrawColor(180); doc.line(margin, y, rightEdge, y); y += 6;
+
+      // ── Summary block (right-aligned) ──
+      const labelX = 148, valX = rightEdge;
+      doc.setFontSize(9); doc.setTextColor(80);
+      const summaryRow = (label: string, val: string, bold = false, color?: [number,number,number]) => {
+        if (bold) doc.setFont(undefined as any, "bold"); else doc.setFont(undefined as any, "normal");
+        if (color) doc.setTextColor(...color); else doc.setTextColor(80);
+        doc.text(label, labelX, y);
+        doc.text(val, valX, y, { align: "right" });
+        y += 7;
+      };
+      summaryRow("Subtotal:",     `Rs.${subtotal.toFixed(2)}`);
+      if (discountTotal > 0) summaryRow("Discount:", `-Rs.${discountTotal.toFixed(2)}`, false, [34, 139, 34]);
+      summaryRow("Tax (5%):",     `Rs.${taxes.toFixed(2)}`);
+      if (otherCharges > 0) summaryRow("Other Charges:", `Rs.${otherCharges.toFixed(2)}`);
+      doc.setDrawColor(92, 26, 27); doc.setLineWidth(0.5);
+      doc.line(labelX, y - 2, rightEdge, y - 2);
+      doc.setFillColor(92, 26, 27);
+      doc.rect(labelX - 2, y, rightEdge - labelX + 10, 11, "F");
+      doc.setFont(undefined as any, "bold"); doc.setFontSize(11);
+      doc.setTextColor(255, 255, 255);
+      doc.text("GRAND TOTAL:", labelX + 1, y + 7.5);
+      doc.text(`Rs. ${grandTotal.toFixed(2)}`, rightEdge + 4, y + 7.5, { align: "right" });
+      y += 20;
+
+      // ── Footer ──
+      doc.setDrawColor(220); doc.setLineWidth(0.3);
+      doc.line(margin, 265, rightEdge, 265);
+      doc.setFont(undefined as any, "normal"); doc.setFontSize(8); doc.setTextColor(120);
+      doc.text("Thank you for visiting! Have a sweet day. 🙏", pageW / 2, 271, { align: "center" });
+      doc.line(margin, 278, margin + 45, 278);
+      doc.text("Authorised Signatory", margin, 283);
+
+      doc.save(`invoice-${invoiceNo}.pdf`);
+    };
+
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width; canvas.height = img.height;
+      canvas.getContext("2d")!.drawImage(img, 0, 0);
+      buildPDF(canvas.toDataURL("image/png"), img.width, img.height);
+    };
+    img.onerror = () => buildPDF();
+    img.src = "/Logo.png";
   };
 
   const handlePrint = () => {
-    const printWindow = window.open("", "", "height=600,width=800");
+    const printWindow = window.open("", "", "height=800,width=900");
     if (!printWindow) return;
-    const itemsHtml = cart.map(item => `<tr><td style="padding:8px;border-bottom:1px solid #eee">${item.name}</td><td style="padding:8px;border-bottom:1px solid #eee;text-align:center">${item.qty}</td><td style="padding:8px;border-bottom:1px solid #eee;text-align:right">Rs.${(item.price * item.qty).toFixed(2)}</td></tr>`).join("");
-    printWindow.document.write(`<html><head><title>Invoice</title><style>body{font-family:Arial,sans-serif;padding:20px;color:#333}.header{text-align:center;margin-bottom:30px}h1{margin:0;color:#5C1A1B;font-family:serif}table{width:100%;border-collapse:collapse;margin-bottom:20px}th{border-bottom:2px solid #5C1A1B;padding:10px;text-align:left}.summary{width:50%;float:right}.sr{display:flex;justify-content:space-between;padding:5px 0}.tr{font-weight:bold;font-size:18px;border-top:2px solid #5C1A1B;padding-top:10px;margin-top:10px;color:#5C1A1B}.footer{clear:both;text-align:center;margin-top:50px;font-size:12px;color:#888}</style></head><body><div class="header"><h1>SHRI BADRINARAYAN PAPRIWALE</h1><p>Main Road, Buxar, Bihar | GSTIN: 10AAAAA0000A1Z5 | Ph: +91 9876543210</p><h2>TAX INVOICE</h2><p style="text-align:left">Date: ${new Date().toLocaleString()}</p></div><table><thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Amount</th></tr></thead><tbody>${itemsHtml}</tbody></table><div class="summary"><div class="sr"><span>Subtotal:</span><span>Rs.${subtotal.toFixed(2)}</span></div><div class="sr"><span>Discount:</span><span>-Rs.${discountTotal.toFixed(2)}</span></div><div class="sr"><span>Taxes (5%):</span><span>Rs.${taxes.toFixed(2)}</span></div><div class="sr"><span>Other Charges:</span><span>Rs.${otherCharges.toFixed(2)}</span></div><div class="sr tr"><span>Grand Total:</span><span>Rs.${grandTotal.toFixed(2)}</span></div></div><div class="footer"><p>Thank you for visiting! Have a sweet day.</p></div></body></html>`);
+    const itemsHtml = cart.map((item, i) =>
+      `<tr class="${i % 2 === 1 ? "alt" : ""}"><td>${i+1}</td><td>${item.name}${item.size ? ` (${item.size})` : ""}</td><td>${item.unit || "pcs"}</td><td>${item.qty}</td><td>&#8377;${item.price.toFixed(2)}</td><td>&#8377;${(item.price * item.qty).toFixed(2)}</td></tr>`
+    ).join("");
+    const logoHtml = `<img src="${window.location.origin}/Logo.png" style="height:46px;width:auto;object-fit:contain;" onerror="this.style.display='none'" />`;
+    const discountRow = discountTotal > 0 ? `<tr><td>Discount</td><td style="color:#228B22">-&#8377;${discountTotal.toFixed(2)}</td></tr>` : "";
+    const otherRow = otherCharges > 0 ? `<tr><td>Other Charges</td><td>&#8377;${otherCharges.toFixed(2)}</td></tr>` : "";
+    printWindow.document.write(`<html><head><title>Invoice ${invoiceNo}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;color:#222;background:#fff}.header{background:#5C1A1B;color:#fff;padding:16px 24px;display:flex;align-items:center;gap:16px}.header-text{flex:1;text-align:center}.brand{font-family:Georgia,serif;font-size:19px;font-weight:bold}.sub{font-size:11px;color:#ddc8b0;margin-top:3px}.tag{font-size:10px;color:#C9A227;font-weight:bold;margin-top:5px;letter-spacing:1px}.gold-bar{height:3px;background:#C9A227}.meta{display:flex;justify-content:space-between;padding:10px 24px;border-bottom:1px solid #eee;font-size:12px;background:#fafafa}.meta p{margin:2px 0}.meta-right{text-align:right}table.items{width:100%;border-collapse:collapse}table.items th{background:#f5f5f5;padding:8px 12px;font-size:11px;text-transform:uppercase;color:#555;border-bottom:2px solid #5C1A1B;text-align:left}table.items th:nth-child(n+3){text-align:right}table.items td{padding:8px 12px;font-size:12px;border-bottom:1px solid #f0f0f0}table.items td:nth-child(n+3){text-align:right}tr.alt td{background:#fafafa}.sw{display:flex;justify-content:flex-end;padding:14px 24px}table.sum{width:250px;border-collapse:collapse;font-size:13px}table.sum td{padding:5px 8px}table.sum td:last-child{text-align:right;font-weight:600}.tr{background:#5C1A1B;color:#fff;font-size:14px;font-weight:bold}.tr td{padding:8px!important}.footer{padding:12px 24px;display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid #eee}.footer p{font-size:11px;color:#888}.sl{border-top:1px solid #999;width:150px;margin-left:auto;margin-bottom:3px}.sign{font-size:11px;color:#555;text-align:right}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="header">${logoHtml}<div class="header-text"><div class="brand">SHRI BADRINARAYAN PAPRIWALE</div><div class="sub">Main Road, Buxar, Bihar - 802101 &nbsp;|&nbsp; GSTIN: 10AAAAA0000A1Z5 &nbsp;|&nbsp; Ph: +91 9876543210</div><div class="tag">TAX INVOICE</div></div></div><div class="gold-bar"></div><div class="meta"><div><p><strong>Invoice No:</strong> ${invoiceNo}</p><p><strong>Date:</strong> ${new Date().toLocaleString()}</p></div><div class="meta-right"><p><strong>Payment Mode:</strong> ${paymentMode}</p></div></div><table class="items"><thead><tr><th>#</th><th>Item</th><th>Unit</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${itemsHtml}</tbody></table><div class="sw"><table class="sum"><tr><td>Subtotal</td><td>&#8377;${subtotal.toFixed(2)}</td></tr>${discountRow}<tr><td>Tax (5%)</td><td>&#8377;${taxes.toFixed(2)}</td></tr>${otherRow}<tr class="tr"><td>GRAND TOTAL</td><td>&#8377;${grandTotal.toFixed(2)}</td></tr></table></div><div class="footer"><p>Thank you for visiting! Have a sweet day.</p><div class="sign"><div class="sl"></div>Authorised Signatory</div></div></body></html>`);
     printWindow.document.close();
-    setTimeout(() => { printWindow.print(); printWindow.close(); }, 250);
+    setTimeout(() => { printWindow.print(); printWindow.close(); }, 500);
   };
 
   const handleWhatsAppShare = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customerPhone || customerPhone.length !== 10) return;
-    const orderId = `INV-2026-${Math.floor(10000 + Math.random() * 90000)}`;
-    const msg = encodeURIComponent(`Your invoice ${orderId} total: Rs.${grandTotal.toFixed(2)}. Thank you for visiting Papriwale!`);
+    const msg = encodeURIComponent(`Your invoice ${invoiceNo} total: Rs.${grandTotal.toFixed(2)}. Thank you for visiting Papriwale!`);
     window.open(`https://wa.me/91${customerPhone}?text=${msg}`, "_blank");
     setShowWhatsAppModal(false);
     setCustomerPhone("");
   };
 
-  const handlePlaceOrder = async () => {
+  const handlePlaceOrder = async (mode: string) => {
     if (cart.length === 0) return;
+    setPaymentMode(mode);
+    const createdBy = localStorage.getItem("adminName") || "Admin";
     await apiFetch("/api/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges })
+      body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: mode, items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, created_by: createdBy })
     });
     setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0);
-    apiFetch("/api/analytics").then(res => res.json()).then(setAnalytics);
+    generateInvoiceNo(); // fresh invoice number for next bill
+    refreshAnalytics();
   };
 
-  // §2.2.1 — exact 6 SRS ribbon cards with correct formulas
+  // §2.2.1 — 6 ribbon cards (no revenue per requirement)
   const ribbonCards = [
-    { label: "Total Revenue", val: `₹${analytics.totalRevenue.toFixed(0)}` },
-    { label: "Total Sales", val: String(analytics.totalSales) },
-    { label: "Total Orders", val: String(analytics.totalOrders) },
+    { label: "Today's Sales", val: String(analytics.totalSales) },
+    { label: "Today's Orders", val: String(analytics.totalOrders) },
     { label: "Total Products", val: String(analytics.totalProducts) },
+    { label: "Total Product Sale", val: String(totalUnitsSold) },
     { label: "Low Stock", val: String(analytics.lowStock), alert: analytics.lowStock > 0 },
     { label: "Out of Stock", val: String(analytics.outOfStock), alert: analytics.outOfStock > 0 },
   ];
@@ -237,74 +383,106 @@ export default function POS() {
               </span>
             )}
           </div>
-          <div className="flex-1 overflow-auto p-4 space-y-3">
+          <div className="flex-1 overflow-auto">
             {cart.length === 0 ? (
-              <div className="text-center text-gray-400 py-10 flex flex-col items-center">
-                <ShoppingCart size={48} className="mb-4 opacity-20" />
-                <p>Cart is empty</p>
+              <div className="text-center text-gray-400 py-16 flex flex-col items-center">
+                <ShoppingCart size={48} className="mb-3 opacity-20" />
+                <p className="text-sm">Cart is empty</p>
               </div>
             ) : (
-              cart.map(item => (
-                <div key={item.id} className="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100">
-                  <div className="flex-1">
-                    <p className="font-semibold text-sm text-gray-800">{item.name}{item.size ? ` (${item.size})` : ""}</p>
-                    <p className="text-xs text-gray-500">₹{item.price.toFixed(2)} x {item.qty}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center bg-white border border-gray-300 rounded">
-                      <button onClick={() => updateQty(item.id, -1)} className="px-2 py-0.5 text-gray-600 hover:bg-gray-100">-</button>
-                      <span className="px-2 text-sm font-medium">{item.qty}</span>
-                      <button onClick={() => updateQty(item.id, 1)} className="px-2 py-0.5 text-gray-600 hover:bg-gray-100">+</button>
-                    </div>
-                    <p className="font-bold text-sm w-16 text-right">₹{item.price * item.qty}</p>
-                    <button onClick={() => removeFromCart(item.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>
-                  </div>
-                </div>
-              ))
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-gray-50 border-b-2 border-gray-200 z-10">
+                  <tr>
+                    <th className="text-left px-3 py-2 text-xs text-gray-500 font-semibold uppercase w-[35%]">Item</th>
+                    <th className="text-center px-2 py-2 text-xs text-gray-500 font-semibold uppercase w-[15%]">Unit</th>
+                    <th className="text-center px-2 py-2 text-xs text-gray-500 font-semibold uppercase w-[18%]">Price ₹</th>
+                    <th className="text-center px-2 py-2 text-xs text-gray-500 font-semibold uppercase w-[12%]">Qty</th>
+                    <th className="text-right px-3 py-2 text-xs text-gray-500 font-semibold uppercase w-[15%]">Total</th>
+                    <th className="w-[5%]"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {cart.map((item, idx) => (
+                    <tr key={item.id} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
+                      <td className="px-3 py-3">
+                        <p className="font-semibold text-gray-800 leading-tight">{item.name}</p>
+                        {item.size && <p className="text-xs text-gray-400 mt-0.5">{item.size}</p>}
+                      </td>
+                      <td className="px-2 py-3">
+                        <input type="text" value={item.unit || "pcs"} onChange={e => updateCartUnit(item.id, e.target.value)}
+                          className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs text-center focus:border-maroon focus:outline-none" />
+                      </td>
+                      <td className="px-2 py-3">
+                        <input type="number" min="0" step="0.01" value={item.price} onChange={e => updateCartPrice(item.id, Number(e.target.value))}
+                          className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs text-center focus:border-maroon focus:outline-none" />
+                      </td>
+                      <td className="px-2 py-3">
+                        <input type="number" min="1" value={item.qty} onChange={e => updateCartQty(item.id, Number(e.target.value))}
+                          className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs text-center focus:border-maroon focus:outline-none" />
+                      </td>
+                      <td className="px-3 py-3 text-right font-bold text-maroon whitespace-nowrap">₹{(item.price * item.qty).toFixed(2)}</td>
+                      <td className="pr-2 py-3">
+                        <button onClick={() => removeFromCart(item.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1 rounded transition-colors">
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
 
-          <div className="p-4 border-t border-gray-100 bg-gray-50 space-y-3">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">Subtotal</span>
-              <span className="font-semibold">₹{subtotal.toFixed(2)}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
+          <div className="border-t border-gray-200 bg-gray-50 px-3 py-2 space-y-1.5">
+            {/* Discount + Other Charges inline */}
+            <div className="grid grid-cols-3 gap-1.5">
               <div>
-                <label className="text-[10px] text-gray-500 uppercase">Discount (Flat ₹)</label>
-                <input type="number" min="0" max={subtotal} value={discountFlat} onChange={e => setDiscountFlat(Math.min(Number(e.target.value), subtotal))} className="w-full border border-gray-300 rounded px-2 py-1 text-sm" />
+                <label className="text-[9px] text-gray-400 uppercase font-semibold">Disc ₹</label>
+                <input type="number" min="0" max={subtotal} value={discountFlat} onChange={e => setDiscountFlat(Math.min(Number(e.target.value), subtotal))} className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
               </div>
               <div>
-                <label className="text-[10px] text-gray-500 uppercase">Discount (%)</label>
-                <input type="number" min="0" max="100" value={discountPercent} onChange={e => setDiscountPercent(Math.min(100, Math.max(0, Number(e.target.value))))} className="w-full border border-gray-300 rounded px-2 py-1 text-sm" />
+                <label className="text-[9px] text-gray-400 uppercase font-semibold">Disc %</label>
+                <input type="number" min="0" max="100" value={discountPercent} onChange={e => setDiscountPercent(Math.min(100, Math.max(0, Number(e.target.value))))} className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
+              </div>
+              <div>
+                <label className="text-[9px] text-gray-400 uppercase font-semibold">Other ₹</label>
+                <input type="number" min="0" value={otherCharges} onChange={e => setOtherCharges(Number(e.target.value))} className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
               </div>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">Taxes (5%)</span>
-              <span className="font-semibold">₹{taxes.toFixed(2)}</span>
+            {/* Summary row */}
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>Subtotal: <span className="font-semibold text-gray-700">₹{subtotal.toFixed(2)}</span></span>
+              <span>Tax 5%: <span className="font-semibold text-gray-700">₹{taxes.toFixed(2)}</span></span>
+              {discountTotal > 0 && <span>Disc: <span className="font-semibold text-green-600">-₹{discountTotal.toFixed(2)}</span></span>}
             </div>
-            <div>
-              <label className="text-[10px] text-gray-500 uppercase">Other Charges</label>
-              <input type="number" min="0" value={otherCharges} onChange={e => setOtherCharges(Number(e.target.value))} className="w-full border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Packaging, delivery..." />
+            {/* Grand Total */}
+            <div className="flex justify-between items-center py-1 border-t border-gray-200">
+              <span className="text-sm font-bold text-maroon">Grand Total</span>
+              <span className="text-xl font-bold text-maroon">₹{grandTotal.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between items-center py-2 border-t border-gray-200 mt-2">
-              <span className="text-lg font-bold text-maroon">Grand Total</span>
-              <span className="text-2xl font-bold text-maroon">₹{grandTotal.toFixed(2)}</span>
+            {/* Payment + Action buttons */}
+            <div className="grid grid-cols-3 gap-1.5">
+              {["Cash", "UPI", "Card"].map(mode => (
+                <button key={mode} disabled={isReadOnly}
+                  onClick={() => setPaymentMode(mode)}
+                  className={`border-2 rounded py-1.5 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${paymentMode === mode ? "border-maroon bg-maroon text-white" : "bg-white border-gray-300 hover:border-maroon hover:text-maroon"}`}>
+                  {mode}
+                </button>
+              ))}
             </div>
-            <div className="grid grid-cols-3 gap-2 mt-4">
-              <button onClick={handlePlaceOrder} disabled={isReadOnly} className="bg-white border-2 border-gray-300 hover:border-maroon hover:text-maroon rounded py-2 text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Cash</button>
-              <button onClick={handlePlaceOrder} disabled={isReadOnly} className="bg-white border-2 border-gray-300 hover:border-maroon hover:text-maroon rounded py-2 text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">UPI</button>
-              <button onClick={handlePlaceOrder} disabled={isReadOnly} className="bg-white border-2 border-gray-300 hover:border-maroon hover:text-maroon rounded py-2 text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Card</button>
-            </div>
-            <div className="grid grid-cols-3 gap-2 mt-2">
-              <button onClick={handlePrint} className="bg-maroon hover:bg-maroon-light text-white font-semibold py-2.5 rounded shadow transition-colors flex items-center justify-center gap-1 text-sm">
-                <Printer size={15} /> Print
+            <button onClick={() => handlePlaceOrder(paymentMode)} disabled={isReadOnly || cart.length === 0}
+              className="w-full bg-maroon hover:bg-maroon-light text-white font-bold py-2 rounded text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              Place Order
+            </button>
+            <div className="grid grid-cols-3 gap-1.5">
+              <button onClick={handlePrint} className="bg-maroon hover:bg-maroon-light text-white font-semibold py-1.5 rounded flex items-center justify-center gap-1 text-xs">
+                <Printer size={13} /> Print
               </button>
-              <button onClick={handleExportPDF} className="bg-gold hover:bg-yellow-600 text-white font-semibold py-2.5 rounded shadow transition-colors flex items-center justify-center gap-1 text-sm">
-                <FileDown size={15} /> PDF
+              <button onClick={handleExportPDF} className="bg-gold hover:bg-yellow-600 text-white font-semibold py-1.5 rounded flex items-center justify-center gap-1 text-xs">
+                <FileDown size={13} /> PDF
               </button>
-              <button onClick={() => setShowWhatsAppModal(true)} className="bg-[#25D366] hover:bg-[#128C7E] text-white font-semibold py-2.5 rounded shadow transition-colors flex items-center justify-center gap-1 text-sm">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp" className="w-4 h-4" /> WhatsApp
+              <button onClick={() => setShowWhatsAppModal(true)} className="bg-[#25D366] hover:bg-[#128C7E] text-white font-semibold py-1.5 rounded flex items-center justify-center gap-1 text-xs">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp" className="w-3.5 h-3.5" /> WA
               </button>
             </div>
           </div>
@@ -321,16 +499,15 @@ export default function POS() {
             </div>
             <div className="p-5">
               <p className="font-bold text-gray-800 text-sm mb-3">Select Serving Size Volume Option:</p>
-              <div className="space-y-2 mb-5">
+              <div className="space-y-2 mb-4">
                 {variantModal.variants.map(v => {
                   const price = variantModal.product.price * v.variant_price_modifier;
                   return (
-                    <label key={v.size_label} className={`flex items-center justify-between p-3 rounded-lg border-2 cursor-pointer transition-colors ${variantSize === v.size_label ? "border-maroon bg-maroon/5" : "border-gray-200"}`}>
+                    <label key={v.size_label} onClick={() => { setVariantSize(v.size_label); setVariantCustomPrice(price); }} className={`flex items-center justify-between p-3 rounded-lg border-2 cursor-pointer transition-colors ${variantSize === v.size_label ? "border-maroon bg-maroon/5" : "border-gray-200"}`}>
                       <div className="flex items-center gap-3">
                         <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${variantSize === v.size_label ? "border-maroon" : "border-gray-300"}`}>
                           {variantSize === v.size_label && <div className="w-2 h-2 rounded-full bg-maroon" />}
                         </div>
-                        <input type="radio" className="hidden" checked={variantSize === v.size_label} onChange={() => setVariantSize(v.size_label)} />
                         <span className="font-medium text-gray-800">{v.size_label}</span>
                       </div>
                       <span className="text-sm font-bold text-gray-600">[Rs. {price.toFixed(2)} Base]</span>
@@ -338,14 +515,55 @@ export default function POS() {
                   );
                 })}
               </div>
-              <p className="font-bold text-gray-800 text-sm mb-3 text-center">Adjust Intended Item Order Volume Balance:</p>
-              <div className="flex items-center justify-center gap-4 mb-5">
-                <button onClick={() => setVariantQty(Math.max(1, variantQty - 1))} className="w-10 h-10 flex items-center justify-center border border-gray-200 rounded-full text-maroon font-bold text-xl hover:bg-maroon/10">-</button>
-                <span className="w-10 text-center font-bold text-xl">{variantQty}</span>
-                <button onClick={() => setVariantQty(variantQty + 1)} className="w-10 h-10 flex items-center justify-center border border-gray-200 rounded-full text-maroon font-bold text-xl hover:bg-maroon/10">+</button>
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div>
+                  <label className="text-[10px] text-gray-500 uppercase font-semibold">Unit</label>
+                  <input type="text" value={variantUnit} onChange={e => setVariantUnit(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2 text-sm" placeholder="pcs, kg..." />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-500 uppercase font-semibold">Price (₹)</label>
+                  <input type="number" min="0" step="0.01" value={variantCustomPrice} onChange={e => setVariantCustomPrice(e.target.value === "" ? "" : Number(e.target.value))} className="w-full border border-gray-300 rounded px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-500 uppercase font-semibold">Quantity</label>
+                  <input type="number" min="1" value={variantQty} onChange={e => setVariantQty(Math.max(1, Number(e.target.value)))} className="w-full border border-gray-300 rounded px-3 py-2 text-sm" />
+                </div>
               </div>
               <button onClick={confirmVariantAdd} className="w-full bg-maroon text-white font-bold py-3 rounded-lg hover:bg-maroon-light transition-colors uppercase tracking-wider text-sm">
                 CONFIRM AND ADD TO CHECKOUT TRAY
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Add Modal for products without variants */}
+      {quickAddModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-gray-100 bg-cream-light flex items-center justify-between">
+              <h3 className="font-serif text-lg text-maroon font-bold">ADD TO BILL</h3>
+              <button onClick={() => setQuickAddModal(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <div className="p-5">
+              <p className="font-semibold text-gray-800 mb-4">{quickAddModal.product.name}</p>
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                <div>
+                  <label className="text-[10px] text-gray-500 uppercase font-semibold">Unit</label>
+                  <input type="text" value={quickUnit} onChange={e => setQuickUnit(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2 text-sm" placeholder="pcs, kg, ltr..." />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-500 uppercase font-semibold">Price (₹)</label>
+                  <input type="number" min="0" step="0.01" value={quickPrice} onChange={e => setQuickPrice(Number(e.target.value))} className="w-full border border-gray-300 rounded px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-500 uppercase font-semibold">Quantity</label>
+                  <input type="number" min="1" value={quickQty} onChange={e => setQuickQty(Math.max(1, Number(e.target.value)))} className="w-full border border-gray-300 rounded px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <p className="text-center text-sm text-gray-500 mb-4">Total: <span className="font-bold text-maroon">₹{(quickPrice * quickQty).toFixed(2)}</span></p>
+              <button onClick={confirmQuickAdd} className="w-full bg-maroon text-white font-bold py-3 rounded-lg hover:bg-maroon-light transition-colors uppercase tracking-wider text-sm">
+                ADD TO BILL
               </button>
             </div>
           </div>

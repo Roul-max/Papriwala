@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Calendar, Trash2, X, Lock } from "lucide-react";
+import { Search, Plus, Calendar, Trash2, X, Lock, Clock } from "lucide-react";
 import { apiFetch } from "../../lib/apiFetch";
 
 const today = new Date().toISOString().split("T")[0];
@@ -10,6 +10,7 @@ export default function AdminEmployee() {
   const [employees, setEmployees] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [roles, setRoles] = useState<string[]>(["Cashier", "Chef", "Manager"]);
+  const [loginSessions, setLoginSessions] = useState<any[]>([]);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState({ ...EMPTY_EMP });
@@ -24,6 +25,9 @@ export default function AdminEmployee() {
   const fetchEmployees = () =>
     apiFetch("/api/employees").then(r => r.json()).then(d => setEmployees(Array.isArray(d) ? d : []));
 
+  const fetchSessions = () =>
+    apiFetch("/api/employee-sessions").then(r => r.json()).then(d => setLoginSessions(Array.isArray(d) ? d : []));
+
   const fetchAttendance = (date: string) => {
     apiFetch(`/api/attendance?date=${date}`).then(r => r.json()).then((records: any[]) => {
       const map: Record<string, string> = {};
@@ -34,7 +38,7 @@ export default function AdminEmployee() {
 
   useEffect(() => {
     fetchEmployees();
-    // Load roles from settings so designation dropdown stays in sync with Settings page
+    fetchSessions();
     apiFetch("/api/settings").then(r => r.json()).then(data => {
       const perms = data.permissions || {};
       const roleNames = Object.keys(perms);
@@ -102,6 +106,9 @@ export default function AdminEmployee() {
             <button onClick={() => setTab("attendance")} className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${tab === "attendance" ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
               Attendance Register
             </button>
+            <button onClick={() => { setTab("sessions"); fetchSessions(); }} className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${tab === "sessions" ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              Login Sessions
+            </button>
           </div>
           {tab === "directory" && (
             <button onClick={() => { setShowAddModal(true); setAddError(""); setAddForm({ ...EMPTY_EMP }); }}
@@ -154,6 +161,43 @@ export default function AdminEmployee() {
               </table>
             </div>
           </>
+        )}
+
+        {tab === "sessions" && (
+          <div className="overflow-auto flex-1 p-4">
+            <p className="text-xs text-gray-400 mb-3">All employee login/logout events — use this to check who was active at any given time.</p>
+            <table className="w-full text-sm text-left border border-gray-200 rounded-lg overflow-hidden">
+              <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="py-3 px-4">Employee</th>
+                  <th className="py-3 px-4">Designation</th>
+                  <th className="py-3 px-4">Login Time</th>
+                  <th className="py-3 px-4">Logout Time</th>
+                  <th className="py-3 px-4">Duration</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loginSessions.map((s: any) => {
+                  const emp = employees.find(e => e.id === s.employee_id);
+                  const loginTime = s.login_time ? new Date(s.login_time) : null;
+                  const logoutTime = s.logout_time ? new Date(s.logout_time) : null;
+                  const duration = loginTime && logoutTime
+                    ? (() => { const m = Math.floor((logoutTime.getTime() - loginTime.getTime()) / 60000); return `${Math.floor(m/60)}h ${m%60}m`; })()
+                    : loginTime ? "Active" : "—";
+                  return (
+                    <tr key={s.id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="py-3 px-4 font-bold text-gray-800">{emp?.full_name || emp?.name || s.employee_id}</td>
+                      <td className="py-3 px-4"><span className="bg-gray-100 px-2 py-1 rounded text-xs">{emp?.designation_tag || "—"}</span></td>
+                      <td className="py-3 px-4 text-gray-600 text-xs flex items-center gap-1"><Clock size={12} className="text-green-500" />{loginTime ? loginTime.toLocaleString() : "—"}</td>
+                      <td className="py-3 px-4 text-gray-600 text-xs">{logoutTime ? logoutTime.toLocaleString() : <span className="text-green-600 font-semibold">Online</span>}</td>
+                      <td className="py-3 px-4 text-xs font-medium">{duration}</td>
+                    </tr>
+                  );
+                })}
+                {loginSessions.length === 0 && <tr><td colSpan={5} className="py-8 text-center text-gray-400 italic">No login sessions recorded yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
         )}
 
         {tab === "attendance" && (

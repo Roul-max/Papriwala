@@ -8,7 +8,27 @@ export default function AdminLogin() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [firstTimeSetup, setFirstTimeSetup] = useState(false);
+  const [newPass, setNewPass] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+  const [setupMsg, setSetupMsg] = useState("");
   const navigate = useNavigate();
+
+  const handleSetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSetupMsg("");
+    if (newPass !== confirmPass) { setSetupMsg("Passwords do not match."); return; }
+    const res = await fetch("/api/auth/set-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_pass: newPass }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setSetupMsg(data.error); return; }
+    setFirstTimeSetup(false);
+    setSetupMsg("");
+    setError("Password set! Please log in.");
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,7 +41,14 @@ export default function AdminLogin() {
         body: JSON.stringify({ username, password, role }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || "Invalid credentials"); return; }
+      if (!res.ok) {
+        if (data.error?.includes("password not set") || data.error?.includes("not configured")) {
+          setFirstTimeSetup(true);
+          setLoading(false);
+          return;
+        }
+        setError(data.error || "Invalid credentials"); return;
+      }
       localStorage.setItem("adminRole",    data.role);
       localStorage.setItem("adminName",    data.name);
       localStorage.setItem("sessionToken", data.sessionToken);
@@ -29,7 +56,6 @@ export default function AdminLogin() {
       if (data.permissions) localStorage.setItem("accessPermissions", JSON.stringify({ [data.role]: data.permissions }));
       if (data.avatar) { localStorage.setItem("adminAvatar", data.avatar); window.dispatchEvent(new Event("avatarChanged")); }
 
-      // Redirect to first accessible page based on role permissions
       if (data.role === "Admin") {
         navigate("/admin/dashboard");
       } else {
@@ -54,53 +80,71 @@ export default function AdminLogin() {
 
   return (
     <div className="flex h-screen w-full font-sans">
-      {/* Left Panel */}
-      <div className="hidden lg:flex w-1/2 bg-maroon text-cream flex-col items-center justify-center relative overflow-hidden">
-        <div className="absolute inset-0 opacity-20 bg-[url('https://images.unsplash.com/photo-1559564104-e3c79a528c0b?auto=format&fit=crop&q=80&w=1200')] bg-cover bg-center mix-blend-overlay"></div>
-        <div className="relative z-10 text-center flex flex-col items-center">
-          <div className="w-32 h-32 rounded-full border-4 border-gold mb-6 flex items-center justify-center bg-cream text-maroon overflow-hidden">
-            <img src="https://images.unsplash.com/photo-1559564104-e3c79a528c0b?auto=format&fit=crop&q=80&w=200" alt="Logo" className="w-full h-full object-cover opacity-80" />
+
+      {/* First-time password setup modal */}
+      {firstTimeSetup && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm">
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl p-6">
+            <h3 className="font-bold text-maroon text-lg mb-1">Set Admin Password</h3>
+            <p className="text-sm text-gray-500 mb-4">No password has been configured yet. Set one to continue.</p>
+            <form onSubmit={handleSetPassword} className="space-y-3">
+              <input type="password" placeholder="New password" value={newPass} onChange={e => setNewPass(e.target.value)}
+                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-maroon" required />
+              <input type="password" placeholder="Confirm password" value={confirmPass} onChange={e => setConfirmPass(e.target.value)}
+                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-maroon" required />
+              <p className="text-xs text-gray-400">Min 8 chars, must include uppercase, lowercase, number and special character.</p>
+              {setupMsg && <p className="text-red-500 text-sm">{setupMsg}</p>}
+              <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors">Set Password</button>
+            </form>
           </div>
-          <h1 className="font-serif text-4xl text-gold font-bold mb-2">SHRI BADRINARAYAN</h1>
-          <p className="text-sm tracking-[0.3em] uppercase mb-8">Papriwale</p>
-          <p className="text-xl font-light italic">"Managing Sweetness, Digitally"</p>
+        </div>
+      )}
+
+      {/* Left Panel */}
+      <div className="hidden lg:flex w-1/2 flex-col relative overflow-hidden bg-maroon">
+        {/* Top: logo + tagline + heading — centered */}
+        <div className="relative z-10 flex flex-col items-center text-center pt-6 px-10">
+          <img src="/Logo.png" alt="Papriwale Logo" className="w-28 h-28 object-contain mb-3" />
+          <p className="text-white/70 text-xs tracking-widest uppercase font-semibold mb-4">
+            SWEETS | NAMKEEN | BAKERY
+          </p>
+          <h1 className="font-serif text-4xl font-bold text-white leading-snug">
+            Managing Sweetness,
+          </h1>
+          <h1 className="font-serif text-4xl font-bold text-gold leading-snug mb-0">
+            Digitally
+          </h1>
+        </div>
+        {/* Bottom: food cover image */}
+        <div className="flex-1 flex items-end overflow-hidden">
+          <img
+            src="/cover.png"
+            alt="Cover"
+            className="w-full object-contain object-bottom"
+          />
         </div>
       </div>
 
       {/* Right Panel */}
-      <div className="w-full lg:w-1/2 bg-white flex flex-col justify-center items-center p-8 relative">
+      <div className="w-full lg:w-1/2 bg-[#fffdf7] flex flex-col justify-center items-center p-8 relative">
         <div className="w-full max-w-md">
-          <h2 className="text-3xl font-bold text-maroon mb-2">Welcome Back!</h2>
-          <p className="text-gray-500 mb-8">Login to continue</p>
+          <h2 className="text-3xl font-bold text-gray-800 mb-1 text-center">Welcome Back !</h2>
+          <p className="text-gray-400 mb-8 text-center">Login to continue</p>
 
-          <div className="flex bg-gray-100 p-1 rounded-md mb-8">
+          <div className="flex bg-[#f5f0e8] p-1 rounded-md mb-8">
             <button
-              className={`flex-1 py-2 rounded-sm text-sm font-semibold transition-colors ${role === "Admin" ? "bg-white shadow text-maroon" : "text-gray-500 hover:text-maroon"}`}
+              className={`flex-1 py-2 rounded-sm text-sm font-semibold transition-colors ${role === "Admin" ? "bg-maroon shadow text-white" : "bg-[#fffdf7] text-maroon/60 hover:text-maroon"}`}
               onClick={() => { setRole("Admin"); setError(""); }}
             >
               Admin
             </button>
             <button
-              className={`flex-1 py-2 rounded-sm text-sm font-semibold transition-colors ${role === "Employee" ? "bg-white shadow text-maroon" : "text-gray-500 hover:text-maroon"}`}
+              className={`flex-1 py-2 rounded-sm text-sm font-semibold transition-colors ${role === "Employee" ? "bg-maroon shadow text-white" : "bg-[#fffdf7] text-maroon/60 hover:text-maroon"}`}
               onClick={() => { setRole("Employee"); setError(""); }}
             >
               Employee
             </button>
           </div>
-
-          {role === "Employee" && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-700 space-y-1.5">
-              <p className="font-bold mb-1">Employee credentials (name / phone):</p>
-              <p>🧾 <strong>Cashier</strong> — <code>Ramesh Kumar</code> / <code>9876500001</code></p>
-              <p>👨‍🍳 <strong>Chef</strong> — <code>Suresh Yadav</code> / <code>9876500002</code></p>
-              <p>🏢 <strong>Manager</strong> — <code>Priya Sharma</code> / <code>9876500003</code></p>
-            </div>
-          )}
-          {role === "Admin" && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-700">
-              Default credentials: <strong>admin</strong> / <strong>Admin@1234</strong>
-            </div>
-          )}
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div className="relative">
@@ -142,12 +186,8 @@ export default function AdminLogin() {
             </button>
           </form>
 
-          {/* Mobile OTP link */}
           <div className="lg:hidden text-center mt-6">
-            <button
-              onClick={() => navigate("/login")}
-              className="text-maroon text-sm font-semibold hover:underline"
-            >
+            <button onClick={() => navigate("/login")} className="text-maroon text-sm font-semibold hover:underline">
               Login with OTP instead →
             </button>
           </div>
@@ -157,6 +197,7 @@ export default function AdminLogin() {
           © 2026 Papriwale. All Rights Reserved.
         </p>
       </div>
+
     </div>
   );
 }

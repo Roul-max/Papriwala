@@ -142,9 +142,6 @@ export default function AdminReport() {
     setGenerating(null);
   };
 
-  const netColor = (n: number): string => n >= 0 ? "#16a34a" : "#b41e1e";
-
-  // helper used inline for range PDF
   const setNetColor = (doc: jsPDF, n: number) => {
     if (n >= 0) doc.setTextColor(22, 163, 74); else doc.setTextColor(180, 30, 30);
   };

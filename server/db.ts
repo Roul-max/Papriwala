@@ -19,10 +19,10 @@ export { supabase };
 // ─── In-memory fallback store (used when Supabase is not configured) ─────────
 export const db: any = {
   products: [
-    { id: "p1", name: "Kaju Katli", category: "Sweets", current_stock_qty: 25, unit_purchase_cost: 400, safety_low_threshold: 5, price: 520, image: "https://images.unsplash.com/photo-1626804475297-4160ebba5270?auto=format&fit=crop&q=80&w=200", sku: "SW-001" },
-    { id: "p2", name: "Motichoor Ladoo", category: "Sweets", current_stock_qty: 40, unit_purchase_cost: 150, safety_low_threshold: 10, price: 200, image: "https://images.unsplash.com/photo-1634563450917-fa254dfb2344?auto=format&fit=crop&q=80&w=200", sku: "SW-002" },
-    { id: "p3", name: "Soan Papdi", category: "Sweets", current_stock_qty: 15, unit_purchase_cost: 180, safety_low_threshold: 10, price: 250, image: "https://images.unsplash.com/photo-1559564104-e3c79a528c0b?auto=format&fit=crop&q=80&w=200", sku: "SW-003" },
-    { id: "p4", name: "Aloo Bhujia", category: "Namkeen", current_stock_qty: 100, unit_purchase_cost: 80, safety_low_threshold: 20, price: 120, image: "https://images.unsplash.com/photo-1605337298642-e931139edaf1?auto=format&fit=crop&q=80&w=200", sku: "NM-001" },
+    { id: "p1", name: "Kaju Katli", category: "Sweets", current_stock_qty: 25, unit_purchase_cost: 400, safety_low_threshold: 5, price: 520, image: "https://images.unsplash.com/photo-1626804475297-4160ebba5270?auto=format&fit=crop&q=80&w=200", sku: "SW-001", unit: "kg", description: "Premium cashew fudge made with pure desi ghee and finest kaju. A signature delicacy perfect for every celebration and gifting." },
+    { id: "p2", name: "Motichoor Ladoo", category: "Sweets", current_stock_qty: 40, unit_purchase_cost: 150, safety_low_threshold: 10, price: 200, image: "https://images.unsplash.com/photo-1634563450917-fa254dfb2344?auto=format&fit=crop&q=80&w=200", sku: "SW-002", unit: "kg", description: "Soft, melt-in-mouth ladoos made from fine boondi, sugar syrup, and cardamom. A festive favourite across generations." },
+    { id: "p3", name: "Soan Papdi", category: "Sweets", current_stock_qty: 15, unit_purchase_cost: 180, safety_low_threshold: 10, price: 250, image: "https://images.unsplash.com/photo-1559564104-e3c79a528c0b?auto=format&fit=crop&q=80&w=200", sku: "SW-003", unit: "kg", description: "Light, flaky and melt-in-the-mouth — our signature Soan Papdi is handcrafted with pure ghee, gram flour, sugar and cardamom." },
+    { id: "p4", name: "Aloo Bhujia", category: "Namkeen", current_stock_qty: 100, unit_purchase_cost: 80, safety_low_threshold: 20, price: 120, image: "https://images.unsplash.com/photo-1605337298642-e931139edaf1?auto=format&fit=crop&q=80&w=200", sku: "NM-001", unit: "kg", description: "Crispy, spiced potato noodles — a classic Bihari namkeen snack enjoyed with tea or as an anytime munch." },
   ],
   product_variants: [
     { variant_id: "v1", product_id: "p1", size_label: "250g", variant_price_modifier: 0.25 },
@@ -59,6 +59,18 @@ export const db: any = {
     { id: "c3", name: "Bakery",    image: "https://images.unsplash.com/photo-1621236378699-8597ffc34082?auto=format&fit=crop&q=80&w=400" },
     { id: "c4", name: "Beverages", image: "https://images.unsplash.com/photo-1544145945-f90425340c7e?auto=format&fit=crop&q=80&w=400" },
     { id: "c5", name: "Snacks",    image: "https://images.unsplash.com/photo-1625220194771-7ebdea0b70b9?auto=format&fit=crop&q=80&w=400" },
+  ],
+  reviews: [
+    { id: "r1", author: "Rahul S.",  rating: 5, text: "The best Kaju Katli in town. Have been a customer for 10 years!",        created_at: "2024-01-10T10:00:00Z" },
+    { id: "r2", author: "Priya M.",  rating: 4, text: "Very fast delivery, samosas were still warm.",                           created_at: "2024-02-14T12:00:00Z" },
+    { id: "r3", author: "Amit K.",   rating: 5, text: "Love the new digital ordering system. Soan Papdi is amazing.",          created_at: "2024-03-05T09:30:00Z" },
+  ],
+  gallery: [
+    { id: "g1", title: "Premium Assorted Sweets", url: "https://images.pexels.com/photos/1028714/pexels-photo-1028714.jpeg?auto=compress&cs=tinysrgb&w=600" },
+    { id: "g2", title: "Fresh Jalebi",            url: "https://images.pexels.com/photos/9609847/pexels-photo-9609847.jpeg?auto=compress&cs=tinysrgb&w=600" },
+    { id: "g3", title: "Samosa & Namkeen",        url: "https://images.pexels.com/photos/4449068/pexels-photo-4449068.jpeg?auto=compress&cs=tinysrgb&w=600" },
+    { id: "g4", title: "Gulab Jamun",             url: "https://images.pexels.com/photos/14477896/pexels-photo-14477896.jpeg?auto=compress&cs=tinysrgb&w=600" },
+    { id: "g5", title: "Bakery Delights",         url: "https://images.pexels.com/photos/1775043/pexels-photo-1775043.jpeg?auto=compress&cs=tinysrgb&w=600" },
   ],
 };
 

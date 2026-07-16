@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ChevronDown, ChevronUp, Check, Clock, MessageCircle, EyeOff } from "lucide-react";
+import { ChevronDown, ChevronUp, Check, Clock, MessageCircle, EyeOff, Filter } from "lucide-react";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
 
@@ -7,6 +7,10 @@ export default function AdminOrders() {
   const [orders, setOrders] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState({ totalRevenue: 0, totalOrders: 0 });
+  const [filterMode, setFilterMode] = useState<"all" | "month" | "custom">("all");
+  const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
 
   const fetchOrders = () => apiFetch("/api/orders").then(r => r.json()).then(d => setOrders(Array.isArray(d) ? d : []));
   const fetchAnalytics = () => apiFetch("/api/analytics").then(r => r.json()).then(d => { if (d && typeof d === "object" && !d.error) setAnalytics(d); });
@@ -48,8 +52,18 @@ export default function AdminOrders() {
   const access = useAccess("Orders");
   const isReadOnly = access === "Read-Only";
 
-  const liveQueue = orders.filter(o => o.order_status !== "Paid").length;
-  const totalPrepared = orders.filter(o => ["Ready to Serve", "Paid"].includes(o.order_status)).length;
+  const filteredOrders = orders.filter(o => {
+    if (!o.timestamp) return filterMode === "all";
+    if (filterMode === "month") return o.timestamp.startsWith(filterMonth);
+    if (filterMode === "custom" && filterFrom && filterTo) {
+      const d = o.timestamp.slice(0, 10);
+      return d >= filterFrom && d <= filterTo;
+    }
+    return true;
+  });
+
+  const liveQueue = filteredOrders.filter(o => o.order_status !== "Paid").length;
+  const totalPrepared = filteredOrders.filter(o => ["Ready to Serve", "Paid"].includes(o.order_status)).length;
 
   const metrics = [
     { label: "Total Daily Orders", val: String(analytics.totalOrders) },
@@ -78,12 +92,38 @@ export default function AdminOrders() {
         ))}
       </div>
 
+      {/* Date Filter Bar */}
+      <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-3 flex flex-wrap items-center gap-3">
+        <Filter size={15} className="text-gray-400" />
+        <span className="text-xs font-semibold text-gray-500 uppercase">Filter:</span>
+        {(["all", "month", "custom"] as const).map(m => (
+          <button key={m} onClick={() => setFilterMode(m)}
+            className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors ${filterMode === m ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+            {m === "all" ? "All Orders" : m === "month" ? "By Month" : "Custom Range"}
+          </button>
+        ))}
+        {filterMode === "month" && (
+          <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm" />
+        )}
+        {filterMode === "custom" && (
+          <>
+            <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 text-sm" />
+            <span className="text-gray-400 text-xs">to</span>
+            <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 text-sm" />
+          </>
+        )}
+        <span className="ml-auto text-xs text-gray-400">{filteredOrders.length} order(s)</span>
+      </div>
+
       {/* Orders List */}
       <div className="space-y-4">
-        {orders.length === 0 ? (
-          <div className="bg-white p-8 text-center text-gray-500 rounded-lg border border-gray-100">No active orders found.</div>
+        {filteredOrders.length === 0 ? (
+          <div className="bg-white p-8 text-center text-gray-500 rounded-lg border border-gray-100">No orders found for selected filter.</div>
         ) : (
-          orders.map((order: any) => (
+          filteredOrders.map((order: any) => (
             <div key={order.id} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
               {/* Collapsed View */}
               <div className="p-4 flex items-center justify-between bg-gray-50 border-b border-gray-100">
@@ -157,6 +197,11 @@ export default function AdminOrders() {
                       <div className="flex justify-between"><span className="text-gray-600">GST</span><span>₹{Number(order.tax_collected || 0).toFixed(2)}</span></div>
                       {Number(order.discount_applied) > 0 && (
                         <div className="flex justify-between text-green-600"><span>Discount</span><span>-₹{Number(order.discount_applied).toFixed(2)}</span></div>
+                      )}
+                      {order.created_by && (
+                        <div className="flex justify-between text-gray-500 text-xs border-t pt-2 mt-2">
+                          <span>Processed by</span><span className="font-semibold">{order.created_by}</span>
+                        </div>
                       )}
                       <div className="flex justify-between font-bold text-lg pt-2 border-t text-maroon">
                         <span>Net Total</span><span>₹{Number(order.grand_total).toFixed(2)}</span>
