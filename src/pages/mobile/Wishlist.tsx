@@ -33,24 +33,24 @@ export default function Wishlist() {
         <div className="p-4 space-y-4">
           {wishlistedProducts.map(product => (
             <div key={product.id} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 flex p-3 relative">
-              <button 
+              <button
                 onClick={() => toggleWishlist(product.id)}
-                className="absolute top-3 right-3 text-maroon"
+                className="absolute top-3 right-3 text-maroon z-10"
               >
                 <Heart size={20} fill="currentColor" />
               </button>
-              <div className="w-24 h-24 rounded-lg overflow-hidden shrink-0">
-                <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
-              </div>
-              <div className="ml-4 flex flex-col justify-between py-1 flex-1">
+              <Link to={`/product/${product.id}`} className="w-24 h-24 rounded-lg overflow-hidden shrink-0 bg-amber-50">
+                <img src={product.image || "/cover.png"} alt={product.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).src = "/cover.png"; }} />
+              </Link>
+              <Link to={`/product/${product.id}`} className="ml-4 flex flex-col justify-between py-1 flex-1">
                 <div>
                   <h3 className="font-bold text-gray-800 pr-6 leading-tight">{product.name}</h3>
                   <p className="text-maroon font-semibold text-sm mt-1">₹{product.price} / kg</p>
                 </div>
-                <Link to={`/product/${product.id}`} className="self-end bg-maroon text-white text-xs font-bold px-4 py-1.5 rounded-full hover:bg-maroon-light">
-                  Add
-                </Link>
-              </div>
+                <span className="self-end bg-maroon text-white text-xs font-bold px-4 py-1.5 rounded-full">
+                  View
+                </span>
+              </Link>
             </div>
           ))}
         </div>
