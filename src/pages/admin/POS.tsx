@@ -11,6 +11,7 @@ export default function POS() {
   const [discountFlat, setDiscountFlat] = useState(0);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [otherCharges, setOtherCharges] = useState(0);
+  const [otherChargesDesc, setOtherChargesDesc] = useState("");
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [customerPhone, setCustomerPhone] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
@@ -40,9 +41,12 @@ export default function POS() {
   const isReadOnly = access === "Read-Only";
 
   const refreshAnalytics = () => {
-    apiFetch("/api/analytics").then(res => res.json()).then(data => setAnalytics(data || analytics));
     const today = new Date().toISOString().split("T")[0];
-    apiFetch("/api/orders").then(res => res.json()).then((orders: any[]) => {
+    Promise.all([
+      apiFetch("/api/analytics").then(res => res.json()),
+      apiFetch("/api/orders").then(res => res.json()),
+    ]).then(([a, orders]) => {
+      setAnalytics(a || analytics);
       const units = (Array.isArray(orders) ? orders : [])
         .filter((o: any) => o.order_status === "Paid" && o.timestamp?.startsWith(today))
         .reduce((sum: number, o: any) => sum + (o.items?.reduce((s: number, it: any) => s + (it.qty || 1), 0) || 0), 0);
@@ -121,7 +125,7 @@ export default function POS() {
   };
 
   const updateCartQty = (id: string, qty: number) => {
-    setCart(prev => prev.map(item => item.id === id ? { ...item, qty: Math.max(1, qty) } : item));
+    setCart(prev => prev.map(item => item.id === id ? { ...item, qty: Math.max(0.01, qty) } : item));
   };
 
   const updateCartUnit = (id: string, unit: string) => {
@@ -133,150 +137,178 @@ export default function POS() {
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
   const clampedFlat = Math.min(Math.max(0, discountFlat), subtotal);
   const clampedPercent = Math.min(Math.max(0, discountPercent), 100);
-  const discountTotal = clampedFlat + (subtotal * (clampedPercent / 100));
+  // Only one discount mode active at a time — flat takes precedence when typed
+  const discountTotal = discountFlat > 0 ? clampedFlat : subtotal * (clampedPercent / 100);
   const taxes = (subtotal - discountTotal) * 0.05;
   const grandTotal = Math.max(0, (subtotal - discountTotal) + taxes + otherCharges);
 
 
   const handleExportPDF = () => {
     if (cart.length === 0) return;
-    const doc = new jsPDF();
-    const pageW = 210;
-    const margin = 14;
-    const rightEdge = pageW - margin;
+    // Thermal receipt: 80mm = ~226.77pt
+    const pageW = 226.77;
+    const doc = new jsPDF({ unit: "pt", format: [pageW, 800] });
+    const cx = pageW / 2;
+    const dash = "-".repeat(38);
+    const now = new Date();
+    const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getFullYear()).slice(-2)}`;
+    const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+    const cashier = localStorage.getItem("adminName") || "ADMIN";
+    const totalQty = cart.reduce((s, i) => s + i.qty, 0);
 
-    const buildPDF = (logoDataUrl?: string, imgW?: number, imgH?: number) => {
-      // ── Header background ──
-      doc.setFillColor(92, 26, 27);
-      doc.rect(0, 0, pageW, 38, "F");
-
-      // ── Logo (top-left, white box area) ──
-      if (logoDataUrl && imgW && imgH) {
-        try {
-          const maxW = 18, maxH = 18;
-          const ratio = Math.min(maxW / imgW, maxH / imgH);
-          doc.addImage(logoDataUrl, "PNG", margin, 10, imgW * ratio, imgH * ratio);
-        } catch {}
-      }
-
-      // ── Brand name & address (centered in header) ──
-      doc.setFont(undefined as any, "bold");
-      doc.setFontSize(15); doc.setTextColor(255, 255, 255);
-      doc.text("SHRI BADRINARAYAN PAPRIWALE", pageW / 2, 17, { align: "center" });
-      doc.setFont(undefined as any, "normal");
-      doc.setFontSize(8); doc.setTextColor(220, 200, 180);
-      doc.text("Main Road, Buxar, Bihar - 802101  |  GSTIN: 10AAAAA0000A1Z5  |  Ph: +91 9876543210", pageW / 2, 24, { align: "center" });
-
-      // ── TAX INVOICE label (gold, right-aligned in header) ──
-      doc.setFont(undefined as any, "bold");
-      doc.setFontSize(9); doc.setTextColor(201, 162, 39);
-      doc.text("TAX INVOICE", rightEdge, 33, { align: "right" });
-
-      // ── Gold divider ──
-      doc.setDrawColor(201, 162, 39); doc.setLineWidth(0.5);
-      doc.line(margin, 42, rightEdge, 42);
-
-      // ── Invoice meta (two columns) ──
-      doc.setFont(undefined as any, "normal"); doc.setFontSize(9); doc.setTextColor(60);
-      doc.setFont(undefined as any, "bold"); doc.text("Invoice No:", margin, 50);
-      doc.setFont(undefined as any, "normal"); doc.text(invoiceNo, margin + 24, 50);
-      doc.setFont(undefined as any, "bold"); doc.text("Date:", margin, 56);
-      doc.setFont(undefined as any, "normal"); doc.text(new Date().toLocaleString(), margin + 14, 56);
-      doc.setFont(undefined as any, "bold"); doc.text("Payment:", rightEdge - 50, 50);
-      doc.setFont(undefined as any, "normal"); doc.text(paymentMode, rightEdge - 50 + 22, 50);
-
-      doc.setDrawColor(220); doc.setLineWidth(0.3);
-      doc.line(margin, 61, rightEdge, 61);
-
-      // ── Table header ──
-      let y = 68;
-      doc.setFillColor(245, 245, 245);
-      doc.rect(margin, y - 5, rightEdge - margin, 8, "F");
-      doc.setFont(undefined as any, "bold"); doc.setFontSize(8); doc.setTextColor(80);
-      doc.text("#",    margin + 1, y);
-      doc.text("ITEM", margin + 8, y);
-      doc.text("UNIT", 110, y);
-      doc.text("QTY",  130, y);
-      doc.text("RATE", 148, y);
-      doc.text("AMOUNT", rightEdge, y, { align: "right" });
-      doc.setDrawColor(180); doc.setLineWidth(0.3);
-      doc.line(margin, y + 2, rightEdge, y + 2);
-      y += 8;
-
-      // ── Table rows ──
-      doc.setFont(undefined as any, "normal"); doc.setFontSize(9); doc.setTextColor(30);
-      cart.forEach((item, i) => {
-        if (i % 2 === 1) { doc.setFillColor(250, 250, 250); doc.rect(margin, y - 5, rightEdge - margin, 8, "F"); }
-        doc.text(String(i + 1), margin + 1, y);
-        const itemName = item.name + (item.size ? ` (${item.size})` : "");
-        doc.text(itemName.length > 32 ? itemName.slice(0, 31) + "…" : itemName, margin + 8, y);
-        doc.text(item.unit || "pcs", 110, y);
-        doc.text(String(item.qty), 130, y);
-        doc.text(`Rs.${item.price.toFixed(2)}`, 148, y);
-        doc.text(`Rs.${(item.price * item.qty).toFixed(2)}`, rightEdge, y, { align: "right" });
-        y += 8;
-      });
-
-      doc.setDrawColor(180); doc.line(margin, y, rightEdge, y); y += 6;
-
-      // ── Summary block (right-aligned) ──
-      const labelX = 148, valX = rightEdge;
-      doc.setFontSize(9); doc.setTextColor(80);
-      const summaryRow = (label: string, val: string, bold = false, color?: [number,number,number]) => {
-        if (bold) doc.setFont(undefined as any, "bold"); else doc.setFont(undefined as any, "normal");
-        if (color) doc.setTextColor(...color); else doc.setTextColor(80);
-        doc.text(label, labelX, y);
-        doc.text(val, valX, y, { align: "right" });
-        y += 7;
-      };
-      summaryRow("Subtotal:",     `Rs.${subtotal.toFixed(2)}`);
-      if (discountTotal > 0) summaryRow("Discount:", `-Rs.${discountTotal.toFixed(2)}`, false, [34, 139, 34]);
-      summaryRow("Tax (5%):",     `Rs.${taxes.toFixed(2)}`);
-      if (otherCharges > 0) summaryRow("Other Charges:", `Rs.${otherCharges.toFixed(2)}`);
-      doc.setDrawColor(92, 26, 27); doc.setLineWidth(0.5);
-      doc.line(labelX, y - 2, rightEdge, y - 2);
-      doc.setFillColor(92, 26, 27);
-      doc.rect(labelX - 2, y, rightEdge - labelX + 10, 11, "F");
-      doc.setFont(undefined as any, "bold"); doc.setFontSize(11);
-      doc.setTextColor(255, 255, 255);
-      doc.text("GRAND TOTAL:", labelX + 1, y + 7.5);
-      doc.text(`Rs. ${grandTotal.toFixed(2)}`, rightEdge + 4, y + 7.5, { align: "right" });
-      y += 20;
-
-      // ── Footer ──
-      doc.setDrawColor(220); doc.setLineWidth(0.3);
-      doc.line(margin, 265, rightEdge, 265);
-      doc.setFont(undefined as any, "normal"); doc.setFontSize(8); doc.setTextColor(120);
-      doc.text("Thank you for visiting! Have a sweet day. 🙏", pageW / 2, 271, { align: "center" });
-      doc.line(margin, 278, margin + 45, 278);
-      doc.text("Authorised Signatory", margin, 283);
-
-      doc.save(`invoice-${invoiceNo}.pdf`);
+    let y = 18;
+    const line = (txt: string, size: number, bold = false, align: "center"|"left"|"right" = "center", x = cx) => {
+      doc.setFont("courier", bold ? "bold" : "normal");
+      doc.setFontSize(size);
+      doc.setTextColor(0);
+      doc.text(txt, x, y, { align });
+      y += size * 1.5;
     };
+    const divider = () => { line(dash, 7, false, "center"); };
 
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = img.width; canvas.height = img.height;
-      canvas.getContext("2d")!.drawImage(img, 0, 0);
-      buildPDF(canvas.toDataURL("image/png"), img.width, img.height);
+    // Header
+    line("Shri Badrinarayan Papriwale", 11, true);
+    line("Sweets | Namkeen | Bakery", 7.5, false);
+    y += 2;
+    line("Main Road, Buxar, Bihar - 802101", 7);
+    line("Ph: +91 9876543210", 7);
+    y += 2;
+    line("GST No: 10AAAAA0000A1Z5", 7);
+    line("FSSAI: 11225302002361", 7);
+    divider();
+
+    // Bill meta
+    doc.setFont("courier", "normal"); doc.setFontSize(7); doc.setTextColor(0);
+    const lx = 10, rx = pageW - 10;
+    const metaRow = (left: string, right: string) => {
+      doc.text(left, lx, y);
+      doc.text(right, rx, y, { align: "right" });
+      y += 10;
     };
-    img.onerror = () => buildPDF();
-    img.src = "/Logo.png";
+    metaRow(`Date: ${dateStr}`, `Time: ${timeStr}`);
+    metaRow(`Cashier: ${cashier.toUpperCase()}`, `Bill No: ${invoiceNo.slice(-5)}`);
+    metaRow(`Payment: ${paymentMode}`, "");
+    doc.setFont("courier", "normal"); doc.setFontSize(7);
+    doc.text("Name: ___________________________", lx, y); y += 10;
+    divider();
+
+    // Table header
+    doc.setFont("courier", "bold"); doc.setFontSize(7);
+    doc.text("Item", lx, y);
+    doc.text("Qty", 130, y, { align: "right" });
+    doc.text("Rate", 168, y, { align: "right" });
+    doc.text("Amt", rx, y, { align: "right" });
+    y += 10;
+    divider();
+
+    // Items
+    doc.setFont("courier", "normal"); doc.setFontSize(7);
+    cart.forEach(item => {
+      const name = (item.name + (item.size ? ` (${item.size})` : "")).slice(0, 22);
+      const amt = (item.price * item.qty).toFixed(2);
+      doc.text(name, lx, y);
+      doc.text(String(item.qty), 130, y, { align: "right" });
+      doc.text(item.price.toFixed(2), 168, y, { align: "right" });
+      doc.text(amt, rx, y, { align: "right" });
+      y += 10;
+    });
+    divider();
+
+    // Totals
+    doc.setFont("courier", "normal"); doc.setFontSize(7);
+    doc.text(`Total Qty: ${totalQty}`, lx, y);
+    doc.text(`Sub Total: ${subtotal.toFixed(2)}`, rx, y, { align: "right" });
+    y += 10;
+    if (discountTotal > 0) { doc.text(`Discount:`, lx, y); doc.text(`-${discountTotal.toFixed(2)}`, rx, y, { align: "right" }); y += 10; }
+    if (otherCharges > 0) { doc.text(`Other Charges:`, lx, y); doc.text(otherCharges.toFixed(2), rx, y, { align: "right" }); y += 10; }
+    doc.text(`Tax (5%):`, lx, y); doc.text(taxes.toFixed(2), rx, y, { align: "right" }); y += 10;
+    doc.setFont("courier", "italic"); doc.setFontSize(6.5);
+    line("[ Net Total Inclusive of GST ]", 6.5, false);
+    divider();
+
+    // Grand Total
+    doc.setFont("courier", "bold"); doc.setFontSize(11);
+    doc.text("Grand Total", lx, y);
+    doc.text(`Rs. ${grandTotal.toFixed(2)}`, rx, y, { align: "right" });
+    y += 16;
+    doc.setFont("courier", "normal"); doc.setFontSize(7);
+    line(`Paid via: ${paymentMode}`, 7, false);
+    divider();
+
+    // Footer
+    line("Thank You & Visit Again..!!", 7.5, true);
+    line("www.papriwale.com", 6.5, false);
+
+    // Trim page height
+    const finalH = y + 20;
+    const doc2 = new jsPDF({ unit: "pt", format: [pageW, finalH] });
+    doc2.setFont("courier", "normal");
+    // Re-render into correctly sized doc
+    doc.save(`receipt-${invoiceNo}.pdf`);
   };
 
   const handlePrint = () => {
-    const printWindow = window.open("", "", "height=800,width=900");
+    if (cart.length === 0) return;
+    const printWindow = window.open("", "", "height=900,width=400");
     if (!printWindow) return;
-    const itemsHtml = cart.map((item, i) =>
-      `<tr class="${i % 2 === 1 ? "alt" : ""}"><td>${i+1}</td><td>${item.name}${item.size ? ` (${item.size})` : ""}</td><td>${item.unit || "pcs"}</td><td>${item.qty}</td><td>&#8377;${item.price.toFixed(2)}</td><td>&#8377;${(item.price * item.qty).toFixed(2)}</td></tr>`
-    ).join("");
-    const logoHtml = `<img src="${window.location.origin}/Logo.png" style="height:46px;width:auto;object-fit:contain;" onerror="this.style.display='none'" />`;
-    const discountRow = discountTotal > 0 ? `<tr><td>Discount</td><td style="color:#228B22">-&#8377;${discountTotal.toFixed(2)}</td></tr>` : "";
-    const otherRow = otherCharges > 0 ? `<tr><td>Other Charges</td><td>&#8377;${otherCharges.toFixed(2)}</td></tr>` : "";
-    printWindow.document.write(`<html><head><title>Invoice ${invoiceNo}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;color:#222;background:#fff}.header{background:#5C1A1B;color:#fff;padding:16px 24px;display:flex;align-items:center;gap:16px}.header-text{flex:1;text-align:center}.brand{font-family:Georgia,serif;font-size:19px;font-weight:bold}.sub{font-size:11px;color:#ddc8b0;margin-top:3px}.tag{font-size:10px;color:#C9A227;font-weight:bold;margin-top:5px;letter-spacing:1px}.gold-bar{height:3px;background:#C9A227}.meta{display:flex;justify-content:space-between;padding:10px 24px;border-bottom:1px solid #eee;font-size:12px;background:#fafafa}.meta p{margin:2px 0}.meta-right{text-align:right}table.items{width:100%;border-collapse:collapse}table.items th{background:#f5f5f5;padding:8px 12px;font-size:11px;text-transform:uppercase;color:#555;border-bottom:2px solid #5C1A1B;text-align:left}table.items th:nth-child(n+3){text-align:right}table.items td{padding:8px 12px;font-size:12px;border-bottom:1px solid #f0f0f0}table.items td:nth-child(n+3){text-align:right}tr.alt td{background:#fafafa}.sw{display:flex;justify-content:flex-end;padding:14px 24px}table.sum{width:250px;border-collapse:collapse;font-size:13px}table.sum td{padding:5px 8px}table.sum td:last-child{text-align:right;font-weight:600}.tr{background:#5C1A1B;color:#fff;font-size:14px;font-weight:bold}.tr td{padding:8px!important}.footer{padding:12px 24px;display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid #eee}.footer p{font-size:11px;color:#888}.sl{border-top:1px solid #999;width:150px;margin-left:auto;margin-bottom:3px}.sign{font-size:11px;color:#555;text-align:right}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="header">${logoHtml}<div class="header-text"><div class="brand">SHRI BADRINARAYAN PAPRIWALE</div><div class="sub">Main Road, Buxar, Bihar - 802101 &nbsp;|&nbsp; GSTIN: 10AAAAA0000A1Z5 &nbsp;|&nbsp; Ph: +91 9876543210</div><div class="tag">TAX INVOICE</div></div></div><div class="gold-bar"></div><div class="meta"><div><p><strong>Invoice No:</strong> ${invoiceNo}</p><p><strong>Date:</strong> ${new Date().toLocaleString()}</p></div><div class="meta-right"><p><strong>Payment Mode:</strong> ${paymentMode}</p></div></div><table class="items"><thead><tr><th>#</th><th>Item</th><th>Unit</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${itemsHtml}</tbody></table><div class="sw"><table class="sum"><tr><td>Subtotal</td><td>&#8377;${subtotal.toFixed(2)}</td></tr>${discountRow}<tr><td>Tax (5%)</td><td>&#8377;${taxes.toFixed(2)}</td></tr>${otherRow}<tr class="tr"><td>GRAND TOTAL</td><td>&#8377;${grandTotal.toFixed(2)}</td></tr></table></div><div class="footer"><p>Thank you for visiting! Have a sweet day.</p><div class="sign"><div class="sl"></div>Authorised Signatory</div></div></body></html>`);
+    const now = new Date();
+    const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getFullYear()).slice(-2)}`;
+    const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+    const cashier = (localStorage.getItem("adminName") || "ADMIN").toUpperCase();
+    const totalQty = cart.reduce((s: number, i: any) => s + i.qty, 0);
+    const dash = `<div class="div">----------------------------------------</div>`;
+    const discountRow = discountTotal > 0 ? `<div class="row"><span>Discount</span><span>-&#8377;${discountTotal.toFixed(2)}</span></div>` : "";
+    const otherRow = otherCharges > 0 ? `<div class="row"><span>Other Charges</span><span>&#8377;${otherCharges.toFixed(2)}</span></div>` : "";
+    const itemsHtml = cart.map((item: any) => {
+      const name = (item.name + (item.size ? ` (${item.size})` : "")).slice(0, 24);
+      return `<div class="item-row"><span class="iname">${name}</span><span class="iqty">${item.qty}</span><span class="irate">${item.price.toFixed(2)}</span><span class="iamt">${(item.price*item.qty).toFixed(2)}</span></div>`;
+    }).join("");
+    printWindow.document.write(`<html><head><title>Receipt</title><style>
+      *{margin:0;padding:0;box-sizing:border-box}
+      body{font-family:'Courier New',Courier,monospace;font-size:11px;color:#000;background:#fff;width:300px;margin:0 auto;padding:10px 6px}
+      .center{text-align:center} .left{text-align:left} .bold{font-weight:bold}
+      .brand{font-size:14px;font-weight:bold;text-align:center}
+      .sub{font-size:10px;text-align:center}
+      .div{text-align:center;letter-spacing:0;font-size:10px;margin:4px 0}
+      .row{display:flex;justify-content:space-between;font-size:10px;margin:1px 0}
+      .col-header{display:flex;justify-content:space-between;font-weight:bold;font-size:10px;margin:2px 0}
+      .item-row{display:flex;font-size:10px;margin:2px 0}
+      .iname{flex:2;overflow:hidden} .iqty{flex:0.5;text-align:right} .irate{flex:0.8;text-align:right} .iamt{flex:0.8;text-align:right}
+      .grand{display:flex;justify-content:space-between;font-size:14px;font-weight:bold;margin:4px 0}
+      @page{size:80mm auto;margin:0}
+      @media print{body{width:80mm;margin:0 auto}}
+    </style></head><body>
+      <div class="brand">Shri Badrinarayan Papriwale</div>
+      <div class="sub">Sweets | Namkeen | Bakery</div>
+      <div style="margin:3px 0"></div>
+      <div class="sub">Main Road, Buxar, Bihar - 802101</div>
+      <div class="sub">Ph: +91 9876543210</div>
+      <div style="margin:3px 0"></div>
+      <div class="sub">GST No: 10AAAAA0000A1Z5</div>
+      <div class="sub">FSSAI: 11225302002361</div>
+      ${dash}
+      <div class="row"><span>Date: ${dateStr}</span><span>Time: ${timeStr}</span></div>
+      <div class="row"><span>Cashier: ${cashier}</span><span>Bill No: ${invoiceNo.slice(-5)}</span></div>
+      <div class="row"><span>Payment: ${paymentMode}</span></div>
+      <div class="row"><span>Name: ___________________________</span></div>
+      ${dash}
+      <div class="col-header"><span style="flex:2">Item</span><span style="flex:0.5;text-align:right">Qty</span><span style="flex:0.8;text-align:right">Rate</span><span style="flex:0.8;text-align:right">Amt</span></div>
+      ${dash}
+      ${itemsHtml}
+      ${dash}
+      <div class="row"><span>Total Qty: ${totalQty}</span><span>Sub Total: ${subtotal.toFixed(2)}</span></div>
+      ${discountRow}${otherRow}
+      <div class="row"><span>Tax (5%)</span><span>&#8377;${taxes.toFixed(2)}</span></div>
+      <div class="sub" style="margin:2px 0">[ Net Total Inclusive of GST ]</div>
+      ${dash}
+      <div class="grand"><span>Grand Total</span><span>&#8377;${grandTotal.toFixed(2)}</span></div>
+      <div class="sub" style="margin:2px 0">Paid via: ${paymentMode}</div>
+      ${dash}
+      <div class="bold center" style="margin-top:4px">Thank You &amp; Visit Again..!!</div>
+      <div class="sub center">www.papriwale.com</div>
+    </body></html>`);
     printWindow.document.close();
-    setTimeout(() => { printWindow.print(); printWindow.close(); }, 500);
+    setTimeout(() => { printWindow.print(); printWindow.close(); }, 400);
   };
 
   const handleWhatsAppShare = (e: React.FormEvent) => {
@@ -288,24 +320,23 @@ export default function POS() {
     setCustomerPhone("");
   };
 
-  const handlePlaceOrder = async (mode: string) => {
+  const handlePlaceAndPrint = async () => {
     if (cart.length === 0) return;
-    setPaymentMode(mode);
     const createdBy = localStorage.getItem("adminName") || "Admin";
     await apiFetch("/api/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: mode, items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, created_by: createdBy })
+      body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: paymentMode, items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, created_by: createdBy })
     });
-    setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0);
-    generateInvoiceNo(); // fresh invoice number for next bill
+    handlePrint();
+    setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
+    generateInvoiceNo();
     refreshAnalytics();
   };
 
-  // §2.2.1 — 6 ribbon cards (no revenue per requirement)
   const ribbonCards = [
-    { label: "Today's Sales", val: String(analytics.totalSales) },
-    { label: "Today's Orders", val: String(analytics.totalOrders) },
+    { label: "Today's Sales", val: `₹${Number(analytics.totalRevenue || 0).toFixed(0)}` },
+    { label: "Today's Orders", val: String(analytics.totalSales) },
     { label: "Total Products", val: String(analytics.totalProducts) },
     { label: "Total Product Sale", val: String(totalUnitsSold) },
     { label: "Low Stock", val: String(analytics.lowStock), alert: analytics.lowStock > 0 },
@@ -417,7 +448,7 @@ export default function POS() {
                           className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs text-center focus:border-maroon focus:outline-none" />
                       </td>
                       <td className="px-2 py-3">
-                        <input type="number" min="1" value={item.qty} onChange={e => updateCartQty(item.id, Number(e.target.value))}
+                        <input type="number" min="0.01" step="0.01" value={item.qty} onChange={e => updateCartQty(item.id, Number(e.target.value))}
                           className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs text-center focus:border-maroon focus:outline-none" />
                       </td>
                       <td className="px-3 py-3 text-right font-bold text-maroon whitespace-nowrap">₹{(item.price * item.qty).toFixed(2)}</td>
@@ -438,15 +469,19 @@ export default function POS() {
             <div className="grid grid-cols-3 gap-1.5">
               <div>
                 <label className="text-[9px] text-gray-400 uppercase font-semibold">Disc ₹</label>
-                <input type="number" min="0" max={subtotal} value={discountFlat} onChange={e => setDiscountFlat(Math.min(Number(e.target.value), subtotal))} className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
+                <input type="number" min="0" step="0.01" max={subtotal} value={discountFlat}
+                  onChange={e => { const v = Math.min(Number(e.target.value), subtotal); setDiscountFlat(v); setDiscountPercent(subtotal > 0 ? parseFloat(((v / subtotal) * 100).toFixed(2)) : 0); }}
+                  className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
               </div>
               <div>
                 <label className="text-[9px] text-gray-400 uppercase font-semibold">Disc %</label>
-                <input type="number" min="0" max="100" value={discountPercent} onChange={e => setDiscountPercent(Math.min(100, Math.max(0, Number(e.target.value))))} className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
+                <input type="number" min="0" step="0.01" max="100" value={discountPercent}
+                  onChange={e => { const v = Math.min(100, Math.max(0, Number(e.target.value))); setDiscountPercent(v); setDiscountFlat(parseFloat(((subtotal * v) / 100).toFixed(2))); }}
+                  className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
               </div>
               <div>
                 <label className="text-[9px] text-gray-400 uppercase font-semibold">Other ₹</label>
-                <input type="number" min="0" value={otherCharges} onChange={e => setOtherCharges(Number(e.target.value))} className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
+                <input type="number" min="0" step="0.01" value={otherCharges} onChange={e => setOtherCharges(Number(e.target.value))} className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
               </div>
             </div>
             {/* Summary row */}
@@ -460,7 +495,13 @@ export default function POS() {
               <span className="text-sm font-bold text-maroon">Grand Total</span>
               <span className="text-xl font-bold text-maroon">₹{grandTotal.toFixed(2)}</span>
             </div>
-            {/* Payment + Action buttons */}
+            {/* Other charges description */}
+            {otherCharges > 0 && (
+              <input type="text" placeholder="Other charges description (e.g. Packing)" value={otherChargesDesc}
+                onChange={e => setOtherChargesDesc(e.target.value)}
+                className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
+            )}
+            {/* Payment mode */}
             <div className="grid grid-cols-3 gap-1.5">
               {["Cash", "UPI", "Card"].map(mode => (
                 <button key={mode} disabled={isReadOnly}
@@ -470,14 +511,12 @@ export default function POS() {
                 </button>
               ))}
             </div>
-            <button onClick={() => handlePlaceOrder(paymentMode)} disabled={isReadOnly || cart.length === 0}
-              className="w-full bg-maroon hover:bg-maroon-light text-white font-bold py-2 rounded text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-              Place Order
+            {/* Place & Print — single combined button */}
+            <button onClick={handlePlaceAndPrint} disabled={isReadOnly || cart.length === 0}
+              className="w-full bg-maroon hover:bg-maroon-light text-white font-bold py-2 rounded text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+              <Printer size={14} /> Place &amp; Print
             </button>
-            <div className="grid grid-cols-3 gap-1.5">
-              <button onClick={handlePrint} className="bg-maroon hover:bg-maroon-light text-white font-semibold py-1.5 rounded flex items-center justify-center gap-1 text-xs">
-                <Printer size={13} /> Print
-              </button>
+            <div className="grid grid-cols-2 gap-1.5">
               <button onClick={handleExportPDF} className="bg-gold hover:bg-yellow-600 text-white font-semibold py-1.5 rounded flex items-center justify-center gap-1 text-xs">
                 <FileDown size={13} /> PDF
               </button>

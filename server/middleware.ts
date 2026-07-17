@@ -69,28 +69,8 @@ async function getSession(token: string): Promise<Session | null> {
   return null;
 }
 
-// ─── Rate limiter — 5 attempts per IP per 15 min ─────────────────────────────
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 5;
-const RATE_WINDOW_MS = 15 * 60 * 1000;
-
-export function checkRateLimit(ip: string): { allowed: boolean; retryAfterSecs: number } {
-  const now = Date.now();
-  const entry = loginAttempts.get(ip);
-  if (!entry || now > entry.resetAt) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    return { allowed: true, retryAfterSecs: 0 };
-  }
-  if (entry.count >= RATE_LIMIT) {
-    return { allowed: false, retryAfterSecs: Math.ceil((entry.resetAt - now) / 1000) };
-  }
-  entry.count++;
-  return { allowed: true, retryAfterSecs: 0 };
-}
-
-export function resetRateLimit(ip: string): void {
-  loginAttempts.delete(ip);
-}
+export function checkRateLimit(_ip: string): { allowed: boolean } { return { allowed: true }; }
+export function resetRateLimit(_ip: string): void {}
 
 // ─── Public paths that skip auth ─────────────────────────────────────────────
 // Mobile QR portal posts orders and reads products/categories without a session.

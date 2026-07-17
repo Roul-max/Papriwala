@@ -10,10 +10,8 @@ export default function AdminLayout() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [showNotifs, setShowNotifs] = useState(false);
   const [avatar, setAvatar] = useState<string | null>(localStorage.getItem("adminAvatar"));
-  const [notifications, setNotifications] = useState<any[]>([
-    { id: "1", title: "Inventory Depleted", desc: "Kaju Katli (1kg) is out of stock", time: "2 hours ago", type: "error" }
-  ]);
-  const [unreadCount, setUnreadCount] = useState(2);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [badgeFlash, setBadgeFlash] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [searchBlocked, setSearchBlocked] = useState<string | null>(null);
@@ -28,6 +26,7 @@ export default function AdminLayout() {
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const alertChimeRef = useRef<HTMLAudioElement | null>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -39,6 +38,21 @@ export default function AdminLayout() {
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online",  handleOnline);
     window.addEventListener("avatarChanged", handleAvatarChange);
+
+    // Load notifications from DB
+    apiFetch("/api/notifications").then(r => r.json()).then((data: any[]) => {
+      if (Array.isArray(data)) {
+        setNotifications(data);
+        setUnreadCount(data.filter(n => !n.read).length);
+      }
+    }).catch(() => {});
+
+    // Close notif panel on any click outside the bell+panel
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setShowNotifs(false);
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setSearchResults(null);
+    };
+    document.addEventListener("click", handleOutsideClick);
 
     // §2.1.2 Hardware-Level Sound Driver Infrastructure
     const initAudio = () => {
@@ -67,64 +81,27 @@ export default function AdminLayout() {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          const addNotif = (title: string, desc: string, type: string) => {
+            const n = { id: Math.random().toString(), title, description: desc, notif_type: type, read: false, created_at: new Date().toISOString() };
+            setNotifications(prev => [n, ...prev]);
+            setUnreadCount(prev => prev + 1);
+            setBadgeFlash(true);
+            setTimeout(() => setBadgeFlash(false), 700);
+          };
 
           if (data.type === "INBOUND_QR_ORDER") {
-            setNotifications(prev => [{
-              id: Math.random().toString(),
-              title: `New Order #${data.payload.order_id}`,
-              desc: `Table ${data.payload.table_number} • ₹${data.payload.bill_amount}`,
-              time: "Just now", type: "info"
-            }, ...prev]);
-            setUnreadCount(prev => prev + 1);
-            setBadgeFlash(true);
-            setTimeout(() => setBadgeFlash(false), 700);
-            if (alertChimeRef.current) {
-              alertChimeRef.current.currentTime = 0;
-              alertChimeRef.current.play().catch(() => {});
-            }
+            addNotif(`New QR Order #${data.payload.order_id}`, `Table ${data.payload.table_number} • ₹${data.payload.bill_amount}`, "info");
+            if (alertChimeRef.current) { alertChimeRef.current.currentTime = 0; alertChimeRef.current.play().catch(() => {}); }
           }
-
           if (data.type === "INVENTORY_DEPLETED") {
             setInventoryDepleted(true);
-            setNotifications(prev => [{
-              id: Math.random().toString(),
-              title: `🚫 Out of Stock: SKU ${data.payload.sku_code}`,
-              desc: `Product ID ${data.payload.product_id} has reached zero stock.`,
-              time: "Just now", type: "error"
-            }, ...prev]);
-            setUnreadCount(prev => prev + 1);
-            setBadgeFlash(true);
-            setTimeout(() => setBadgeFlash(false), 700);
+            addNotif(`🚫 Out of Stock: SKU ${data.payload.sku_code}`, `Product ${data.payload.product_id} has reached zero stock.`, "error");
           }
-
+          if (data.type === "LOW_STOCK_ALERT") {
+            addNotif(`⚠️ Low Stock: ${data.payload.product_name}`, `Only ${data.payload.remaining_qty} units left.`, "warning");
+          }
           if (data.type === "DEALER_INVOICE_DUE") {
-            setDealerInvoiceModal({
-              dealer_id:   data.payload.dealer_id,
-              dealer_name: data.payload.dealer_name,
-              amount_due:  data.payload.amount_due,
-              expiry_date: data.payload.expiry_date,
-            });
-            setNotifications(prev => [{
-              id: Math.random().toString(),
-              title: `Invoice Due: ${data.payload.dealer_name}`,
-              desc: `₹${data.payload.amount_due} due by ${data.payload.expiry_date}`,
-              time: "Just now", type: "warning"
-            }, ...prev]);
-            setUnreadCount(prev => prev + 1);
-            setBadgeFlash(true);
-            setTimeout(() => setBadgeFlash(false), 700);
-          }
-
-          if (data.type === "FORBIDDEN_ACCESS_ATTEMPT") {
-            setNotifications(prev => [{
-              id: Math.random().toString(),
-              title: "⚠️ Unauthorized Access Attempt",
-              desc: `Role "${data.payload.role}" tried to access ${data.payload.path}`,
-              time: "Just now", type: "error"
-            }, ...prev]);
-            setUnreadCount(prev => prev + 1);
-            setBadgeFlash(true);
-            setTimeout(() => setBadgeFlash(false), 700);
+            setDealerInvoiceModal({ dealer_id: data.payload.dealer_id, dealer_name: data.payload.dealer_name, amount_due: data.payload.amount_due, expiry_date: data.payload.expiry_date });
           }
         } catch {}
       };
@@ -142,29 +119,29 @@ export default function AdminLayout() {
       destroyed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       window.removeEventListener("resize", handleResize);
-      window.removeEventListener("avatarChanged", handleAvatarChange);
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("online",  handleOnline);
+      window.removeEventListener("avatarChanged", handleAvatarChange);
       window.removeEventListener("click", initAudio);
+      document.removeEventListener("click", handleOutsideClick);
       ws?.close();
     };
   }, []);
 
+  const searchRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (searchQuery.length < 2) { setSearchResults(null); return; }
     const timer = setTimeout(async () => {
-      if (isOffline) { setSearchResults({ products: [], dealers: [], employees: [] }); return; }
       try {
         const res = await apiFetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
         if (res.ok) setSearchResults(await res.json());
       } catch { setIsOffline(true); }
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchQuery, isOffline]);
+  }, [searchQuery]);
 
   const navigate = useNavigate();
-
-  if (isMobile) return <Navigate to="/" replace />;
 
   const role = localStorage.getItem("adminRole") || "";
   const permissions: Record<string, Record<string, string>> = JSON.parse(localStorage.getItem("accessPermissions") || "{}");
@@ -241,10 +218,10 @@ export default function AdminLayout() {
 
           <div className="flex items-center gap-6">
             {/* Omni-Search */}
-            <div className="relative">
+            <div className="relative" ref={searchRef}>
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
               <input
-                type="search" placeholder="Omni-Search..."
+                type="text" placeholder="Omni-Search..."
                 className={`pl-10 pr-4 py-2 rounded-full border bg-white text-sm focus:outline-none focus:border-gold w-64 ${isOffline ? "border-red-500" : "border-gray-300"}`}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
@@ -303,9 +280,10 @@ export default function AdminLayout() {
             </div>
 
             {/* Bell / Notifications */}
-            <div className="relative">
-              <button className="relative w-10 h-10 flex items-center justify-center text-maroon hover:text-gold transition-colors focus:outline-none mt-1"
-                onClick={() => { setShowNotifs(!showNotifs); if (!showNotifs) setUnreadCount(0); }}>
+            <div className="relative" ref={notifRef}>
+              <button
+                className="relative w-10 h-10 flex items-center justify-center text-maroon hover:text-gold transition-colors focus:outline-none"
+                onClick={() => { setShowNotifs(!showNotifs); if (!showNotifs) { setUnreadCount(0); apiFetch("/api/notifications/read-all", { method: "PATCH" }).catch(() => {}); } }}>
                 <Bell size={24} />
                 {unreadCount > 0 && (
                   <span className={`absolute top-0.5 right-0.5 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center ${badgeFlash ? "badge-flash" : ""}`}>
@@ -321,14 +299,14 @@ export default function AdminLayout() {
                       <div className="p-4 text-center text-gray-500 text-sm">No notifications</div>
                     ) : notifications.map(notif => (
                       <div key={notif.id} className="p-3 border-b border-gray-50 hover:bg-gray-50 cursor-pointer">
-                        <p className={`text-sm font-semibold ${notif.type === "error" ? "text-red-600" : notif.type === "warning" ? "text-amber-600" : "text-gray-800"}`}>{notif.title}</p>
-                        <p className="text-xs text-gray-600">{notif.desc}</p>
-                        <span className="text-[10px] text-gray-400 mt-1 block">{notif.time}</span>
+                        <p className={`text-sm font-semibold ${notif.notif_type === "error" ? "text-red-600" : notif.notif_type === "warning" ? "text-amber-600" : "text-gray-800"}`}>{notif.title}</p>
+                        <p className="text-xs text-gray-600">{notif.description}</p>
+                        <span className="text-[10px] text-gray-400 mt-1 block">{new Date(notif.created_at).toLocaleString()}</span>
                       </div>
                     ))}
                   </div>
                   <div className="p-2 text-center border-t border-gray-100 bg-gray-50">
-                    <button onClick={() => setNotifications([])} className="text-xs font-semibold text-maroon hover:text-maroon-light">Clear all</button>
+                    <button onClick={() => { apiFetch("/api/notifications", { method: "DELETE" }).catch(() => {}); setNotifications([]); setUnreadCount(0); }} className="text-xs font-semibold text-maroon hover:text-maroon-light">Clear all</button>
                   </div>
                 </div>
               )}

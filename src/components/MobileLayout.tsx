@@ -1,43 +1,92 @@
 import { Outlet, Link, useLocation, Navigate } from "react-router-dom";
 import { Home, Grid, ShoppingBag, User, Menu, X, FileText, Bell } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { apiFetch } from "../lib/apiFetch";
 
 export default function MobileLayout() {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
   const [avatar, setAvatar] = useState<string | null>(localStorage.getItem("customerAvatar"));
-  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(true);
+  const [showNotifs, setShowNotifs] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // §3.1 — QR session binding: extract table_id from URL and lock to sessionStorage
     const params = new URLSearchParams(window.location.search);
     const tableId = params.get("table_id");
     if (tableId) sessionStorage.setItem("qr_table_id", tableId);
 
     const handleResize = () => setIsDesktop(window.innerWidth >= 768);
-    const handleProfileUpdate = () => {
-      setAvatar(localStorage.getItem("customerAvatar"));
-    };
-    
-    // Simulate checking for unread notifications based on preferences
-    const checkNotifications = () => {
-      const enabled = localStorage.getItem("notificationsEnabled") !== "false";
-      setHasUnreadNotifications(enabled);
-    };
+    const handleProfileUpdate = () => setAvatar(localStorage.getItem("customerAvatar"));
 
     window.addEventListener("resize", handleResize);
     window.addEventListener("customerProfileUpdated", handleProfileUpdate);
-    window.addEventListener("notificationsPreferenceChanged", checkNotifications);
-    
-    checkNotifications();
+
+    // Load notifications
+    const loadNotifs = () => {
+      apiFetch("/api/notifications").then(r => r.json()).then((data: any[]) => {
+        if (Array.isArray(data)) {
+          // Mobile: only show order-related notifications
+          const mobile = data.filter(n => ["INBOUND_QR_ORDER", "TABLE_STATE_CHANGE"].includes(n.type));
+          setNotifications(mobile);
+          setUnreadCount(mobile.filter(n => !n.read).length);
+        }
+      }).catch(() => {});
+    };
+    loadNotifs();
+
+    // WebSocket for real-time order updates on mobile
+    let ws: WebSocket;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let destroyed = false;
+    const connectWS = () => {
+      if (destroyed) return;
+      const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${window.location.host}/api/ws`);
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (["INBOUND_QR_ORDER", "TABLE_STATE_CHANGE"].includes(data.type)) {
+            loadNotifs();
+          }
+        } catch {}
+      };
+      ws.onclose = () => { if (!destroyed) reconnectTimer = setTimeout(connectWS, 3000); };
+      ws.onerror = () => ws.close();
+    };
+    connectWS();
+
+    // Close notif panel on outside click
+    const handleClick = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setShowNotifs(false);
+    };
+    document.addEventListener("mousedown", handleClick);
 
     return () => {
+      destroyed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("customerProfileUpdated", handleProfileUpdate);
-      window.removeEventListener("notificationsPreferenceChanged", checkNotifications);
+      document.removeEventListener("mousedown", handleClick);
+      ws?.close();
     };
   }, []);
+
+  const handleBellClick = () => {
+    setShowNotifs(v => !v);
+    if (!showNotifs && unreadCount > 0) {
+      apiFetch("/api/notifications/read-all", { method: "PATCH" }).catch(() => {});
+      setUnreadCount(0);
+    }
+  };
+
+  const clearNotifs = () => {
+    apiFetch("/api/notifications", { method: "DELETE" }).catch(() => {});
+    setNotifications([]);
+    setUnreadCount(0);
+  };
 
   if (isDesktop) {
     return <Navigate to="/admin/login" replace />;
@@ -52,12 +101,33 @@ export default function MobileLayout() {
         </button>
         <img src="/Logo.png" alt="Logo" className="w-12 h-12 object-contain absolute left-1/2 -translate-x-1/2" />
         <div className="flex items-center space-x-3">
-          <Link to="/orders" className="p-1 relative">
-            <Bell size={20} />
-            {hasUnreadNotifications && (
-              <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 border-2 border-maroon rounded-full"></span>
+          <div className="relative" ref={notifRef}>
+            <button onClick={handleBellClick} className="p-1 relative">
+              <Bell size={20} />
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 border-2 border-maroon rounded-full text-white text-[9px] font-bold flex items-center justify-center">{unreadCount}</span>
+              )}
+            </button>
+            {showNotifs && (
+              <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+                  <span className="font-bold text-gray-800 text-sm">Notifications</span>
+                  <button onClick={clearNotifs} className="text-xs text-maroon font-semibold">Clear all</button>
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <div className="p-6 text-center text-gray-400 text-sm">No notifications</div>
+                  ) : notifications.map(n => (
+                    <div key={n.id} className={`px-4 py-3 border-b border-gray-50 ${!n.read ? "bg-amber-50" : ""}`}>
+                      <p className={`text-sm font-semibold ${n.notif_type === "error" ? "text-red-600" : n.notif_type === "warning" ? "text-amber-600" : "text-gray-800"}`}>{n.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{n.description}</p>
+                      <span className="text-[10px] text-gray-400 mt-1 block">{new Date(n.created_at).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
-          </Link>
+          </div>
           <Link to="/profile" className="p-1">
             {avatar ? (
               <img src={avatar} alt="Profile" className="w-6 h-6 rounded-full object-cover border border-gold/50" />

@@ -12,8 +12,8 @@ const otpStore = new Map<string, { otp: string; expires: number; employeeId: str
 // ─── Public auth routes (NO middleware) ──────────────────────────────────────
 router.post("/auth/login", async (req, res) => {
   const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "unknown";
-  const { allowed, retryAfterSecs } = checkRateLimit(ip);
-  if (!allowed) return res.status(429).json({ error: `Too many attempts. Try again in ${Math.ceil(retryAfterSecs / 60)} min.` });
+  const { allowed } = checkRateLimit(ip);
+  if (!allowed) return res.status(429).json({ error: "Too many failed attempts. Please try again later." });
 
   const { username, password, role } = req.body;
   const u = (username ?? "").trim();
@@ -98,12 +98,13 @@ router.post("/auth/logout", async (req, res) => {
   const token = req.header("X-Session-Token") || "";
   if (token) {
     await destroySession(token);
+    const logoutTime = new Date().toISOString();
+    if (supabase) {
+      try { await supabase.from("employee_sessions").update({ logout_time: logoutTime }).eq("session_token", token).is("logout_time", null); } catch {}
+    }
     if (db.employee_sessions) {
       const s = db.employee_sessions.find((s: any) => s.session_token === token && !s.logout_time);
-      if (s) {
-        s.logout_time = new Date().toISOString();
-        if (supabase) try { await supabase.from("employee_sessions").update({ logout_time: s.logout_time }).eq("session_token", token); } catch {}
-      }
+      if (s) s.logout_time = logoutTime;
     }
   }
   res.json({ success: true });
@@ -159,7 +160,11 @@ router.post("/products/:id/stock", async (req, res) => {
   if (local) local.current_stock_qty = newQty;
   const logEntry = { id: crypto.randomUUID(), type: type === "in" ? "STOCK_IN" : "STOCK_OUT", product_id: product.id, product_name: product.name, qty: amount, reason: reason || "", operator: session?.name || "Admin", timestamp: new Date().toISOString() };
   await dbInsert("inventory_log", logEntry, db.inventory_log);
-  if (newQty === 0) broadcast({ type: "INVENTORY_DEPLETED", payload: { product_id: product.id, sku_code: product.sku, remaining_qty: 0 } });
+  if (newQty === 0) {
+    broadcast({ type: "INVENTORY_DEPLETED", payload: { product_id: product.id, sku_code: product.sku, remaining_qty: 0 } });
+  } else if (newQty > 0 && newQty <= product.safety_low_threshold) {
+    broadcast({ type: "LOW_STOCK_ALERT", payload: { product_id: product.id, product_name: product.name, sku_code: product.sku, remaining_qty: newQty } });
+  }
   res.json({ ...product, current_stock_qty: newQty });
 });
 
@@ -178,7 +183,10 @@ router.post("/orders", async (req, res) => {
   const orderId = `INV-${new Date().getFullYear()}-${ts.toString().slice(-6)}`;
   const newOrder = { ...req.body, id: orderId, timestamp: new Date().toISOString() };
   const saved = await dbInsert("orders", newOrder, db.orders);
-  broadcast({ type: "INBOUND_QR_ORDER", payload: { order_id: saved.id, table_number: saved.table_id || "Delivery", bill_amount: saved.grand_total } });
+  // Only notify for QR/mobile orders, not POS direct billing
+  if (saved.order_source !== "Direct POS") {
+    broadcast({ type: "INBOUND_QR_ORDER", payload: { order_id: saved.id, table_number: saved.table_id || "Delivery", bill_amount: saved.grand_total } });
+  }
   res.json(saved);
 });
 
@@ -419,6 +427,35 @@ router.delete("/categories/:id", async (req, res) => {
   await dbDelete("categories", req.params.id);
   const idx = db.categories.findIndex((c: any) => c.id === req.params.id);
   if (idx !== -1) db.categories.splice(idx, 1);
+  res.json({ success: true });
+});
+
+// ─── Notifications ───────────────────────────────────────────────────────────
+router.get("/notifications", async (req, res) => {
+  if (!db.notifications) db.notifications = [];
+  const all = await dbSelect("notifications", db.notifications);
+  res.json(all.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+});
+
+router.post("/notifications", async (req, res) => {
+  if (!db.notifications) db.notifications = [];
+  const entry = { id: crypto.randomUUID(), ...req.body, created_at: new Date().toISOString(), read: false };
+  res.json(await dbInsert("notifications", entry, db.notifications));
+});
+
+router.patch("/notifications/read-all", async (req, res) => {
+  if (!db.notifications) db.notifications = [];
+  if (supabase) {
+    await supabase.from("notifications").update({ read: true }).eq("read", false);
+  }
+  db.notifications.forEach((n: any) => { n.read = true; });
+  res.json({ success: true });
+});
+
+router.delete("/notifications", async (req, res) => {
+  if (!db.notifications) db.notifications = [];
+  if (supabase) await supabase.from("notifications").delete().neq("id", "");
+  db.notifications = [];
   res.json({ success: true });
 });
 

@@ -189,7 +189,7 @@ export default function AdminEmployee() {
                       <td className="py-3 px-4 font-bold text-gray-800">{emp?.full_name || emp?.name || s.employee_id}</td>
                       <td className="py-3 px-4"><span className="bg-gray-100 px-2 py-1 rounded text-xs">{emp?.designation_tag || "—"}</span></td>
                       <td className="py-3 px-4 text-gray-600 text-xs flex items-center gap-1"><Clock size={12} className="text-green-500" />{loginTime ? loginTime.toLocaleString() : "—"}</td>
-                      <td className="py-3 px-4 text-gray-600 text-xs">{logoutTime ? logoutTime.toLocaleString() : <span className="text-green-600 font-semibold">Online</span>}</td>
+                      <td className="py-3 px-4 text-gray-600 text-xs">{logoutTime ? logoutTime.toLocaleString() : <span className="text-green-600 font-semibold animate-pulse">● Active</span>}</td>
                       <td className="py-3 px-4 text-xs font-medium">{duration}</td>
                     </tr>
                   );
