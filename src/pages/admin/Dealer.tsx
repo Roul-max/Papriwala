@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, X, Trash2, EyeOff } from "lucide-react";
+import { Plus, X, Trash2, EyeOff, CheckCircle2, AlertCircle } from "lucide-react";
 import { apiFetch } from "../../lib/apiFetch";
 import { useAccess } from "../../hooks/useAccess";
 
@@ -12,6 +12,7 @@ export default function DealerExpenses() {
   const [orders, setOrders] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [rawPurchases, setRawPurchases] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
 
   const [showDealerModal, setShowDealerModal] = useState(false);
   const [dealerForm, setDealerForm] = useState({ name: "", address: "", gstin: "", phone: "" });
@@ -22,7 +23,7 @@ export default function DealerExpenses() {
   const [expenseError, setExpenseError] = useState("");
 
   const [showRawModal, setShowRawModal] = useState(false);
-  const [rawForm, setRawForm] = useState({ material_name: "", qty: "", unit: "kg", rate_per_unit: "", dealer_id: "", notes: "" });
+  const [rawForm, setRawForm] = useState({ material_name: "", qty: "", unit: "kg", rate_per_unit: "", dealer_id: "", notes: "", is_paid: false, due_date: new Date(Date.now() + 7*24*60*60*1000).toISOString().split("T")[0] });
   const [rawError, setRawError] = useState("");
 
   const access = useAccess("Financial Reports");
@@ -35,7 +36,8 @@ export default function DealerExpenses() {
       apiFetch("/api/orders").then(r => r.json()).catch(() => []),
       apiFetch("/api/products").then(r => r.json()).catch(() => []),
       apiFetch("/api/raw-material-purchases").then(r => r.json()).catch(() => []),
-    ]).then(([d, e, o, p, rm]) => { setDealers(d); setExpenses(e); setOrders(o); setProducts(p); setRawPurchases(Array.isArray(rm) ? rm : []); });
+      apiFetch("/api/employees").then(r => r.json()).catch(() => []),
+    ]).then(([d, e, o, p, rm, emps]) => { setDealers(d); setExpenses(e); setOrders(o); setProducts(p); setRawPurchases(Array.isArray(rm) ? rm : []); setEmployees(Array.isArray(emps) ? emps : []); });
   };
 
   useEffect(() => { fetchAll(); }, []);
@@ -74,6 +76,9 @@ export default function DealerExpenses() {
     if (expenseForm.expense_code === "EXP_RAW_MATERIAL" && !expenseForm.dealer_id) {
       setExpenseError("Raw Material expenses must be linked to a dealer."); return;
     }
+    if (expenseForm.expense_code === "EXP_SALARY_DRAW" && !expenseForm.dealer_id) {
+      setExpenseError("Salary Draw must be linked to an employee."); return;
+    }
     await apiFetch("/api/expenses", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...expenseForm, amount: Number(expenseForm.amount), dealer_id: expenseForm.dealer_id || null })
@@ -92,7 +97,7 @@ export default function DealerExpenses() {
       body: JSON.stringify({ ...rawForm, qty: Number(rawForm.qty), rate_per_unit: Number(rawForm.rate_per_unit), dealer_id: rawForm.dealer_id || null })
     });
     setShowRawModal(false);
-    setRawForm({ material_name: "", qty: "", unit: "kg", rate_per_unit: "", dealer_id: "", notes: "" });
+    setRawForm({ material_name: "", qty: "", unit: "kg", rate_per_unit: "", dealer_id: "", notes: "", is_paid: false, due_date: new Date(Date.now() + 7*24*60*60*1000).toISOString().split("T")[0] });
     fetchAll();
   };
 
@@ -132,12 +137,16 @@ export default function DealerExpenses() {
                   <th className="py-3 px-4">Rate/Unit</th>
                   <th className="py-3 px-4">Total</th>
                   <th className="py-3 px-4">Dealer</th>
+                  <th className="py-3 px-4">Due Date</th>
+                  <th className="py-3 px-4">Payment</th>
                   <th className="py-3 px-4">Notes</th>
                 </tr>
               </thead>
               <tbody>
-                {rawPurchases.map((r: any) => (
-                  <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                {rawPurchases.map((r: any) => {
+                  const isOverdue = !r.is_paid && r.due_date && r.due_date < new Date().toISOString().split("T")[0];
+                  return (
+                  <tr key={r.id} className={`border-b border-gray-100 hover:bg-gray-50 ${isOverdue ? "bg-red-50" : ""}`}>
                     <td className="py-3 px-4 text-gray-500 text-xs">{new Date(r.purchase_date).toLocaleDateString()}</td>
                     <td className="py-3 px-4 font-bold text-gray-800">{r.material_name}</td>
                     <td className="py-3 px-4">{r.qty}</td>
@@ -145,10 +154,23 @@ export default function DealerExpenses() {
                     <td className="py-3 px-4">₹{Number(r.rate_per_unit).toFixed(2)}</td>
                     <td className="py-3 px-4 font-bold">₹{(r.qty * r.rate_per_unit).toFixed(2)}</td>
                     <td className="py-3 px-4 text-gray-500 text-xs">{dealers.find(d => d.id === r.dealer_id)?.name || "—"}</td>
+                    <td className="py-3 px-4 text-xs">
+                      <span className={isOverdue ? "text-red-600 font-bold" : "text-gray-500"}>{r.due_date || "—"}</span>
+                    </td>
+                    <td className="py-3 px-4">
+                      {r.is_paid
+                        ? <span className="flex items-center gap-1 text-green-600 text-xs font-bold"><CheckCircle2 size={12} /> Paid</span>
+                        : <button onClick={async () => { await apiFetch(`/api/raw-material-purchases/${r.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_paid: true }) }); fetchAll(); }}
+                            className="text-xs bg-green-600 text-white px-2 py-1 rounded font-semibold hover:bg-green-700">
+                            Mark Paid
+                          </button>
+                      }
+                    </td>
                     <td className="py-3 px-4 text-gray-400 text-xs">{r.notes || "—"}</td>
                   </tr>
-                ))}
-                {rawPurchases.length === 0 && <tr><td colSpan={8} className="py-8 text-center text-gray-400 italic">No raw material purchases recorded.</td></tr>}
+                  );
+                })}
+                {rawPurchases.length === 0 && <tr><td colSpan={10} className="py-8 text-center text-gray-400 italic">No raw material purchases recorded.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -255,9 +277,10 @@ export default function DealerExpenses() {
               <thead className="text-xs text-gray-500 uppercase bg-white border-b border-gray-200 sticky top-0 z-10">
                 <tr>
                   <th className="py-3 px-4">Date</th>
-                  <th className="py-3 px-4">Code</th>
+                  <th className="py-3 px-4">Category</th>
                   <th className="py-3 px-4">Amount</th>
-                  <th className="py-3 px-4">Dealer</th>
+                  <th className="py-3 px-4">Dealer / Employee</th>
+                  <th className="py-3 px-4">Description</th>
                 </tr>
               </thead>
               <tbody>
@@ -266,10 +289,15 @@ export default function DealerExpenses() {
                     <td className="py-3 px-4 text-gray-500 text-xs">{new Date(e.expense_date || Date.now()).toLocaleDateString()}</td>
                     <td className="py-3 px-4 font-mono text-xs"><span className="bg-gray-100 px-2 py-1 rounded">{expenseCodeLabel[e.expense_code] || e.expense_code}</span></td>
                     <td className="py-3 px-4 font-bold text-gray-800">₹{Number(e.amount).toFixed(2)}</td>
-                    <td className="py-3 px-4 text-gray-500 text-xs">{dealers.find(d => d.id === e.dealer_id)?.name || "—"}</td>
+                    <td className="py-3 px-4 text-gray-500 text-xs">
+                      {e.expense_code === "EXP_SALARY_DRAW"
+                        ? (() => { const emp = employees.find((em: any) => em.id === e.dealer_id); return emp ? `${emp.full_name || emp.name} (${emp.designation_tag})` : "—"; })()
+                        : dealers.find(d => d.id === e.dealer_id)?.name || "—"}
+                    </td>
+                    <td className="py-3 px-4 text-gray-400 text-xs">{e.description || "—"}</td>
                   </tr>
                 ))}
-                {expenses.length === 0 && <tr><td colSpan={4} className="py-8 text-center text-gray-500 italic">No expenses recorded.</td></tr>}
+                {expenses.length === 0 && <tr><td colSpan={5} className="py-8 text-center text-gray-500 italic">No expenses recorded.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -316,6 +344,19 @@ export default function DealerExpenses() {
                   <option value="">— Select Dealer —</option>
                   {dealers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">Due Date</label>
+                  <input type="date" value={rawForm.due_date} onChange={e => setRawForm(p => ({ ...p, due_date: e.target.value }))}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+                </div>
+                <div className="flex items-end pb-2">
+                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input type="checkbox" checked={rawForm.is_paid} onChange={e => setRawForm(p => ({ ...p, is_paid: e.target.checked }))} className="accent-green-600" />
+                    Already Paid
+                  </label>
+                </div>
               </div>
               <div>
                 <label className="text-xs font-semibold text-gray-600 uppercase">Notes</label>
@@ -384,6 +425,18 @@ export default function DealerExpenses() {
                   <option value="EXP_MISC_OPERATIONAL">Misc Operational (EXP_MISC_OPERATIONAL)</option>
                 </select>
               </div>
+              {expenseForm.expense_code === "EXP_SALARY_DRAW" && (
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">Employee <span className="text-red-500">*</span></label>
+                  <select required value={expenseForm.dealer_id} onChange={e => setExpenseForm(p => ({ ...p, dealer_id: e.target.value }))}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
+                    <option value="">— Select Employee —</option>
+                    {employees.filter(e => !e.last_working_date || e.last_working_date >= new Date().toISOString().split("T")[0]).map(e => (
+                      <option key={e.id} value={e.id}>{e.full_name || e.name} ({e.designation_tag})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {expenseForm.expense_code === "EXP_RAW_MATERIAL" && (
                 <div>
                   <label className="text-xs font-semibold text-gray-600 uppercase">Linked Dealer <span className="text-red-500">*</span></label>

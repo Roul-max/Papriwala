@@ -70,7 +70,7 @@ export default function POS() {
     if (categoryFilter !== "All") result = result.filter(p => p.category === categoryFilter);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      result = result.filter(p => p.name.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q));
+      result = result.filter(p => p.name?.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q) || p.id?.toLowerCase().includes(q));
     }
     setFilteredProducts(result);
   }, [categoryFilter, searchQuery, products]);
@@ -335,12 +335,12 @@ export default function POS() {
   };
 
   const ribbonCards = [
-    { label: "Today's Sales", val: `₹${Number(analytics.totalRevenue || 0).toFixed(0)}` },
-    { label: "Today's Orders", val: String(analytics.totalSales) },
-    { label: "Total Products", val: String(analytics.totalProducts) },
-    { label: "Total Product Sale", val: String(totalUnitsSold) },
-    { label: "Low Stock", val: String(analytics.lowStock), alert: analytics.lowStock > 0 },
-    { label: "Out of Stock", val: String(analytics.outOfStock), alert: analytics.outOfStock > 0 },
+    { label: "Today's Sales",    val: `₹${Number(analytics.totalRevenue || 0).toFixed(0)}` },
+    { label: "Today's Orders",   val: String(analytics.totalOrders) },
+    { label: "Total Products",   val: String(analytics.totalProducts) },
+    { label: "Total Product Sale",val: String(totalUnitsSold) },
+    { label: "Low Stock",        val: String(analytics.lowStock),   alert: analytics.lowStock > 0 },
+    { label: "Out of Stock",     val: String(analytics.outOfStock), alert: analytics.outOfStock > 0 },
   ];
 
   return (
@@ -424,37 +424,37 @@ export default function POS() {
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-gray-50 border-b-2 border-gray-200 z-10">
                   <tr>
-                    <th className="text-left px-3 py-2 text-xs text-gray-500 font-semibold uppercase w-[35%]">Item</th>
-                    <th className="text-center px-2 py-2 text-xs text-gray-500 font-semibold uppercase w-[15%]">Unit</th>
-                    <th className="text-center px-2 py-2 text-xs text-gray-500 font-semibold uppercase w-[18%]">Price ₹</th>
-                    <th className="text-center px-2 py-2 text-xs text-gray-500 font-semibold uppercase w-[12%]">Qty</th>
-                    <th className="text-right px-3 py-2 text-xs text-gray-500 font-semibold uppercase w-[15%]">Total</th>
-                    <th className="w-[5%]"></th>
+                    <th className="text-left px-3 py-2 text-xs text-gray-500 font-semibold uppercase">Item</th>
+                    <th className="text-center px-1 py-2 text-xs text-gray-500 font-semibold uppercase w-[14%]">Unit</th>
+                    <th className="text-center px-1 py-2 text-xs text-gray-500 font-semibold uppercase w-[20%]">Price</th>
+                    <th className="text-center px-1 py-2 text-xs text-gray-500 font-semibold uppercase w-[16%]">Qty</th>
+                    <th className="text-right px-2 py-2 text-xs text-gray-500 font-semibold uppercase w-[18%]">Total</th>
+                    <th className="w-[6%]"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {cart.map((item, idx) => (
                     <tr key={item.id} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                      <td className="px-3 py-3">
-                        <p className="font-semibold text-gray-800 leading-tight">{item.name}</p>
-                        {item.size && <p className="text-xs text-gray-400 mt-0.5">{item.size}</p>}
+                      <td className="px-3 py-2">
+                        <p className="font-semibold text-gray-800 text-xs leading-tight">{item.name}</p>
+                        {item.size && <p className="text-[10px] text-gray-400 mt-0.5">{item.size}</p>}
                       </td>
-                      <td className="px-2 py-3">
+                      <td className="px-1 py-2">
                         <input type="text" value={item.unit || "pcs"} onChange={e => updateCartUnit(item.id, e.target.value)}
-                          className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs text-center focus:border-maroon focus:outline-none" />
+                          className="w-full border border-gray-300 rounded px-1 py-1 text-xs text-center focus:border-maroon focus:outline-none" />
                       </td>
-                      <td className="px-2 py-3">
+                      <td className="px-1 py-2">
                         <input type="number" min="0" step="0.01" value={item.price} onChange={e => updateCartPrice(item.id, Number(e.target.value))}
-                          className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs text-center focus:border-maroon focus:outline-none" />
+                          className="w-full border border-gray-300 rounded px-1 py-1 text-xs text-center focus:border-maroon focus:outline-none" />
                       </td>
-                      <td className="px-2 py-3">
+                      <td className="px-1 py-2">
                         <input type="number" min="0.01" step="0.01" value={item.qty} onChange={e => updateCartQty(item.id, Number(e.target.value))}
-                          className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs text-center focus:border-maroon focus:outline-none" />
+                          className="w-full border border-gray-300 rounded px-1 py-1 text-xs text-center focus:border-maroon focus:outline-none" />
                       </td>
-                      <td className="px-3 py-3 text-right font-bold text-maroon whitespace-nowrap">₹{(item.price * item.qty).toFixed(2)}</td>
-                      <td className="pr-2 py-3">
+                      <td className="px-2 py-2 text-right font-bold text-maroon text-xs whitespace-nowrap">₹{(item.price * item.qty).toFixed(2)}</td>
+                      <td className="pr-1 py-2">
                         <button onClick={() => removeFromCart(item.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1 rounded transition-colors">
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                         </button>
                       </td>
                     </tr>
@@ -495,12 +495,10 @@ export default function POS() {
               <span className="text-sm font-bold text-maroon">Grand Total</span>
               <span className="text-xl font-bold text-maroon">₹{grandTotal.toFixed(2)}</span>
             </div>
-            {/* Other charges description */}
-            {otherCharges > 0 && (
-              <input type="text" placeholder="Other charges description (e.g. Packing)" value={otherChargesDesc}
-                onChange={e => setOtherChargesDesc(e.target.value)}
-                className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
-            )}
+            {/* Other charges description — always visible */}
+            <input type="text" placeholder="Other charges description (e.g. Packing)" value={otherChargesDesc}
+              onChange={e => setOtherChargesDesc(e.target.value)}
+              className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
             {/* Payment mode */}
             <div className="grid grid-cols-3 gap-1.5">
               {["Cash", "UPI", "Card"].map(mode => (

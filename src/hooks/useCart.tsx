@@ -31,6 +31,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     const saved = localStorage.getItem("cartItems");
     return saved ? JSON.parse(saved) : [];
   });
+
+  const [toast, setToast] = useState<{ name: string; image: string } | null>(null);
+  const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = (name: string, image: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ name, image });
+    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  };
   
   const [dbVariants, setDbVariants] = useState<any[]>([]);
 
@@ -73,6 +82,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       if (existing) return prev.map(i => i.id === cartItemId ? { ...i, qty: i.qty + quantity } : i);
       return [...prev, { id: cartItemId, product_id: product.id, name: product.name, size: size!, price: finalPrice, qty: quantity, image: product.image }];
     });
+    showToast(product.name, product.image);
   };
 
   const handleModalConfirm = () => {
@@ -94,7 +104,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         image: selectedProduct.image
       }];
     });
-    
+    showToast(selectedProduct.name, selectedProduct.image);
     setShowModal(false);
   };
 
@@ -119,6 +129,28 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   return (
     <CartContext.Provider value={{ items, addToCart, removeFromCart, updateQty, updateNote, clearCart, subtotal, tax, total }}>
       {children}
+
+      {/* Added to cart toast */}
+      {toast && (
+        <div
+          className="fixed top-5 left-1/2 z-[200] pointer-events-none"
+          style={{
+            transform: `translateX(-50%)`,
+            animation: 'slideDown 0.35s cubic-bezier(0.34,1.56,0.64,1)',
+          }}
+        >
+          <div className="flex items-center gap-3 bg-gray-900 text-white px-4 py-3 rounded-2xl shadow-2xl min-w-[220px] max-w-[320px]">
+            {toast.image
+              ? <img src={toast.image} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}/>
+              : <div className="w-10 h-10 rounded-lg bg-maroon shrink-0 flex items-center justify-center text-white text-lg">🛒</div>}
+            <div className="flex flex-col">
+              <span className="text-xs text-gray-400 font-medium">Added to cart</span>
+              <span className="text-sm font-bold leading-tight line-clamp-1">{toast.name}</span>
+            </div>
+            <span className="ml-auto text-green-400 text-xl">✓</span>
+          </div>
+        </div>
+      )}
       
       {/* Sizing Modal */}
       {showModal && (

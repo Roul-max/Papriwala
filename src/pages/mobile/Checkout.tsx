@@ -79,12 +79,13 @@ export default function Checkout() {
         <h3 className="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wider">Payment Method</h3>
         <div className="space-y-3">
           {methods.map(m => (
-            <label key={m.id} className={`flex items-center p-4 rounded-xl border-2 transition-colors cursor-pointer ${method === m.id ? "border-maroon bg-maroon/5" : "border-gray-200 bg-white"}`}>
-              <div className={`w-5 h-5 rounded-full border-2 mr-4 flex items-center justify-center ${method === m.id ? "border-maroon" : "border-gray-300"}`}>
+            <label key={m.id} onClick={() => setMethod(m.id)} className={`flex items-center p-4 rounded-xl border-2 transition-colors cursor-pointer ${method === m.id ? "border-maroon bg-maroon/5" : "border-gray-200 bg-white"}`}>
+              <div className={`w-5 h-5 rounded-full border-2 mr-4 flex items-center justify-center shrink-0 ${method === m.id ? "border-maroon" : "border-gray-300"}`}>
                 {method === m.id && <div className="w-2.5 h-2.5 rounded-full bg-maroon" />}
               </div>
               <span className="font-semibold text-gray-800">{m.name}</span>
               {m.id === "cash" && <span className="ml-auto text-xs text-orange-500 font-semibold">Pay Later</span>}
+              {m.id === "upi" && <span className="ml-auto text-xs text-green-600 font-semibold">Instant</span>}
             </label>
           ))}
         </div>

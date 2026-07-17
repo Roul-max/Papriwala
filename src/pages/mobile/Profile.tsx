@@ -9,6 +9,7 @@ export default function Profile() {
   const [name, setName] = useState("Guest");
   const [role, setRole] = useState("");
   const [phone, setPhone] = useState("");
+  const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -26,6 +27,7 @@ export default function Profile() {
       setRole(adminRole);
       setPhone(savedPhone);
       if (adminAvatar) setAvatar(adminAvatar);
+      if (adminRole === "Customer") setIsNewCustomer(localStorage.getItem("isNewCustomer") === "true");
     } else {
       if (savedAvatar) setAvatar(savedAvatar);
       if (savedName)   setName(savedName);
@@ -94,8 +96,14 @@ export default function Profile() {
             </div>
           )}
 
-          {role && (
+          {role === "Customer" && isNewCustomer && (
+            <span className="bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">🎉 New Customer</span>
+          )}
+          {role && role !== "Customer" && (
             <span className="bg-maroon/10 text-maroon text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">{role}</span>
+          )}
+          {role === "Customer" && !isNewCustomer && (
+            <span className="bg-maroon/10 text-maroon text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">Returning Customer</span>
           )}
           {phone && (
             <p className="text-gray-500 text-sm mb-4">+91 {phone.slice(0,5)} {phone.slice(5)}</p>

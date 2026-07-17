@@ -98,9 +98,14 @@ export default function Orders() {
                 </div>
                 <div className="space-y-1 mb-3">
                   {order.items?.map((item: any, j: number) => (
-                    <div key={j} className="flex justify-between text-xs text-gray-600">
-                      <span>{item.name} {item.size ? `(${item.size})` : ""} x{item.qty}</span>
-                      <span>₹{(item.price * item.qty).toFixed(2)}</span>
+                    <div key={j} className="flex items-center gap-3 py-1">
+                      {item.image
+                        ? <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover shrink-0 border border-gray-100" onError={e => { (e.target as HTMLImageElement).src = "/cover.png"; }} />
+                        : <img src="/cover.png" alt={item.name} className="w-10 h-10 rounded-lg object-cover shrink-0 border border-gray-100" />}
+                      <div className="flex-1 flex justify-between text-xs text-gray-600">
+                        <span className="font-medium">{item.name} {item.size ? `(${item.size})` : ""} x{item.qty}</span>
+                        <span className="font-bold text-maroon">₹{(item.price * item.qty).toFixed(2)}</span>
+                      </div>
                     </div>
                   ))}
                 </div>

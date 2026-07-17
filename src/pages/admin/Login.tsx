@@ -188,7 +188,7 @@ export default function AdminLogin() {
 
           <div className="lg:hidden text-center mt-6">
             <button onClick={() => navigate("/login")} className="text-maroon text-sm font-semibold hover:underline">
-              Login with OTP instead →
+              Customer Portal →
             </button>
           </div>
         </div>

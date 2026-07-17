@@ -2,9 +2,12 @@ import { Outlet, Link, useLocation, Navigate } from "react-router-dom";
 import { Home, Grid, ShoppingBag, User, Menu, X, FileText, Bell } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { apiFetch } from "../lib/apiFetch";
+import { useCart } from "../hooks/useCart";
 
 export default function MobileLayout() {
   const location = useLocation();
+  const { items } = useCart();
+  const cartCount = items.length;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
   const [avatar, setAvatar] = useState<string | null>(localStorage.getItem("customerAvatar"));
@@ -93,7 +96,7 @@ export default function MobileLayout() {
   }
 
   return (
-    <div className="mobile-portal flex flex-col h-screen w-full max-w-md mx-auto bg-cream-light font-sans relative overflow-hidden shadow-2xl sm:border-x sm:border-gray-200">
+    <div className="mobile-portal flex flex-col h-screen w-full max-w-md mx-auto bg-cream-light font-sans relative overflow-hidden shadow-2xl sm:border-x sm:border-gray-200" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
       {/* Top Header */}
       <header className="bg-maroon text-cream flex items-center justify-between p-4 shrink-0 z-20">
         <button onClick={() => setSidebarOpen(true)} className="p-1">
@@ -109,12 +112,12 @@ export default function MobileLayout() {
               )}
             </button>
             {showNotifs && (
-              <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden">
+              <div className="fixed inset-x-0 top-[72px] mx-3 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
                   <span className="font-bold text-gray-800 text-sm">Notifications</span>
                   <button onClick={clearNotifs} className="text-xs text-maroon font-semibold">Clear all</button>
                 </div>
-                <div className="max-h-72 overflow-y-auto">
+                <div className="max-h-[60vh] overflow-y-auto">
                   {notifications.length === 0 ? (
                     <div className="p-6 text-center text-gray-400 text-sm">No notifications</div>
                   ) : notifications.map(n => (
@@ -148,14 +151,22 @@ export default function MobileLayout() {
         {[
           { name: "Home", path: "/", icon: Home },
           { name: "Categories", path: "/categories", icon: Grid },
-          { name: "Cart", path: "/cart", icon: ShoppingBag },
+          { name: "Cart", path: "/cart", icon: ShoppingBag, badge: cartCount },
           { name: "Orders", path: "/orders", icon: FileText },
           { name: "Profile", path: "/profile", icon: User }
         ].map((item) => {
           const isActive = location.pathname === item.path;
+          const badge = (item as any).badge;
           return (
-            <Link key={item.name} to={item.path} className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${isActive ? 'text-maroon' : 'text-gray-400 hover:text-maroon-light'}`}>
-              <item.icon size={20} className={isActive ? 'fill-maroon/10' : ''} />
+            <Link key={item.name} to={item.path} className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors relative ${isActive ? 'text-maroon' : 'text-gray-400 hover:text-maroon-light'}`}>
+              <div className="relative">
+                <item.icon size={20} className={isActive ? 'fill-maroon/10' : ''} />
+                {badge > 0 && (
+                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 bg-maroon text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5">
+                    {badge > 99 ? "99+" : badge}
+                  </span>
+                )}
+              </div>
               <span className="text-[10px] font-semibold">{item.name}</span>
             </Link>
           );

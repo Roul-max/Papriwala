@@ -1,9 +1,21 @@
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Calendar, Trash2, X, Lock, Clock } from "lucide-react";
+import { Search, Plus, Calendar, Trash2, X, Lock, Clock, Printer } from "lucide-react";
 import { apiFetch } from "../../lib/apiFetch";
 
 const today = new Date().toISOString().split("T")[0];
 const EMPTY_EMP = { full_name: "", designation_tag: "", phone_number: "", salary_type_flag: "Monthly", base_compensation_rate: "", joining_date: "", last_working_date: "" };
+
+function getNextSalaryDate(joiningDate: string, salaryType: string): string {
+  if (!joiningDate) return "—";
+  const now = new Date();
+  if (salaryType === "Monthly") {
+    const day = new Date(joiningDate).getDate();
+    let next = new Date(now.getFullYear(), now.getMonth(), day);
+    if (next <= now) next = new Date(now.getFullYear(), now.getMonth() + 1, day);
+    return next.toLocaleDateString();
+  }
+  return "Daily";
+}
 
 export default function AdminEmployee() {
   const [tab, setTab] = useState("directory");
@@ -21,6 +33,9 @@ export default function AdminEmployee() {
   const [isLocked, setIsLocked] = useState(false);
   const [adminOverride, setAdminOverride] = useState(false);
   const [savingAttendance, setSavingAttendance] = useState(false);
+  const [reportEmp, setReportEmp] = useState("");
+  const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [reportData, setReportData] = useState<any[]>([]);
 
   const fetchEmployees = () =>
     apiFetch("/api/employees").then(r => r.json()).then(d => setEmployees(Array.isArray(d) ? d : []));
@@ -84,6 +99,14 @@ export default function AdminEmployee() {
     setAttendanceMap(prev => ({ ...prev, [empId]: status }));
   };
 
+  const fetchAttendanceReport = async (empId: string, month: string) => {
+    if (!empId || !month) return;
+    const res = await apiFetch("/api/attendance");
+    const all = await res.json();
+    const filtered = (Array.isArray(all) ? all : []).filter((a: any) => a.employee_id === empId && a.calendar_date?.startsWith(month));
+    setReportData(filtered);
+  };
+
   const handleSaveAttendance = async () => {
     setSavingAttendance(true);
     await Promise.all(employees.map(emp =>
@@ -108,6 +131,9 @@ export default function AdminEmployee() {
             </button>
             <button onClick={() => { setTab("sessions"); fetchSessions(); }} className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${tab === "sessions" ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
               Login Sessions
+            </button>
+            <button onClick={() => setTab("report")} className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${tab === "report" ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              Attendance Report
             </button>
           </div>
           {tab === "directory" && (
@@ -138,6 +164,7 @@ export default function AdminEmployee() {
                     <th className="py-3 px-4">Salary Type</th>
                     <th className="py-3 px-4">Rate (₹)</th>
                     <th className="py-3 px-4">Joined Date</th>
+                    <th className="py-3 px-4">Next Salary</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -151,6 +178,7 @@ export default function AdminEmployee() {
                       <td className="py-3 px-4">{emp.salary_type_flag}</td>
                       <td className="py-3 px-4 font-medium">{emp.base_compensation_rate}</td>
                       <td className="py-3 px-4 text-gray-500">{emp.joining_date}</td>
+                      <td className="py-3 px-4 text-xs font-semibold text-maroon">{getNextSalaryDate(emp.joining_date, emp.salary_type_flag)}</td>
                       <td className="py-3 px-4 text-right">
                         <button onClick={() => handleDeleteEmployee(emp.id)} className="text-red-600 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16} /></button>
                       </td>
@@ -197,6 +225,70 @@ export default function AdminEmployee() {
                 {loginSessions.length === 0 && <tr><td colSpan={5} className="py-8 text-center text-gray-400 italic">No login sessions recorded yet.</td></tr>}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {tab === "report" && (
+          <div className="p-4 flex flex-col gap-4">
+            <div className="flex gap-3 flex-wrap items-end">
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Employee</label>
+                <select value={reportEmp} onChange={e => { setReportEmp(e.target.value); fetchAttendanceReport(e.target.value, reportMonth); }}
+                  className="block border border-gray-300 rounded px-3 py-2 text-sm mt-1 bg-white min-w-[200px]">
+                  <option value="">— Select Employee —</option>
+                  {employees.map(e => <option key={e.id} value={e.id}>{e.full_name || e.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Month</label>
+                <input type="month" value={reportMonth} onChange={e => { setReportMonth(e.target.value); fetchAttendanceReport(reportEmp, e.target.value); }}
+                  className="block border border-gray-300 rounded px-3 py-2 text-sm mt-1" />
+              </div>
+              {reportData.length > 0 && (
+                <button onClick={() => {
+                  const emp = employees.find(e => e.id === reportEmp);
+                  const w = window.open("", "", "height=600,width=500");
+                  if (!w) return;
+                  const counts = reportData.reduce((acc: any, r: any) => { acc[r.status_flag] = (acc[r.status_flag] || 0) + 1; return acc; }, {});
+                  w.document.write(`<html><head><title>Attendance Report</title><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f5f5f5}</style></head><body>
+                    <h2>Attendance Report — ${emp?.full_name || emp?.name}</h2>
+                    <p>Month: ${reportMonth} | Total Days: ${reportData.length}</p>
+                    <p>Present: ${counts['Present']||0} | Absent: ${counts['Absent']||0} | Half-Day: ${counts['Half-Day']||0} | Paid Leave: ${counts['Paid Leave']||0}</p>
+                    <table><thead><tr><th>Date</th><th>Status</th></tr></thead><tbody>
+                    ${reportData.sort((a,b)=>a.calendar_date.localeCompare(b.calendar_date)).map((r:any)=>`<tr><td>${r.calendar_date}</td><td>${r.status_flag}</td></tr>`).join('')}
+                    </tbody></table></body></html>`);
+                  w.document.close(); setTimeout(() => { w.print(); w.close(); }, 300);
+                }} className="flex items-center gap-1 bg-maroon text-white px-3 py-2 rounded text-sm font-semibold hover:bg-maroon-light">
+                  <Printer size={14} /> Print Report
+                </button>
+              )}
+            </div>
+            {reportData.length > 0 ? (
+              <>
+                <div className="flex gap-4 text-sm">
+                  {Object.entries(reportData.reduce((acc: any, r: any) => { acc[r.status_flag] = (acc[r.status_flag] || 0) + 1; return acc; }, {})).map(([k, v]: any) => (
+                    <span key={k} className="bg-gray-100 px-3 py-1 rounded font-semibold">{k}: <strong>{v}</strong></span>
+                  ))}
+                </div>
+                <table className="w-full text-sm text-left border border-gray-200 rounded-lg overflow-hidden">
+                  <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
+                    <tr><th className="py-3 px-4">Date</th><th className="py-3 px-4">Status</th></tr>
+                  </thead>
+                  <tbody>
+                    {reportData.sort((a, b) => a.calendar_date.localeCompare(b.calendar_date)).map((r: any) => (
+                      <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="py-3 px-4">{r.calendar_date}</td>
+                        <td className="py-3 px-4"><span className={`px-2 py-1 rounded text-xs font-bold ${
+                          r.status_flag === "Present" ? "bg-green-100 text-green-700" :
+                          r.status_flag === "Absent" ? "bg-red-100 text-red-700" :
+                          r.status_flag === "Half-Day" ? "bg-yellow-100 text-yellow-700" : "bg-blue-100 text-blue-700"
+                        }`}>{r.status_flag}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            ) : <p className="text-gray-400 italic text-sm">{reportEmp ? "No attendance records for this month." : "Select an employee to view report."}</p>}
           </div>
         )}
 

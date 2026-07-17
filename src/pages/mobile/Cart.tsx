@@ -1,5 +1,5 @@
 import { useCart } from "../../hooks/useCart";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { ChevronLeft, Trash2 } from "lucide-react";
 
 export default function Cart() {
@@ -23,15 +23,15 @@ export default function Cart() {
         {items.map(item => (
           <div key={item.id} className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 flex flex-col gap-3 relative">
             <div className="flex gap-4">
-              <div className="w-20 h-20 rounded-lg overflow-hidden shrink-0">
-                <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-              </div>
+              <Link to={`/product/${item.product_id}`} className="w-20 h-20 rounded-lg overflow-hidden shrink-0 bg-amber-50">
+                <img src={item.image || "/cover.png"} alt={item.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).src = "/cover.png"; }} />
+              </Link>
               <div className="flex-1 flex flex-col justify-between">
                 <div className="flex items-start justify-between">
-                  <div>
+                  <Link to={`/product/${item.product_id}`} className="flex-1">
                     <h3 className="font-bold text-gray-800 text-sm">{item.name}</h3>
                     <p className="text-gray-500 text-xs">{item.size} • ₹{item.price}</p>
-                  </div>
+                  </Link>
                   <button onClick={() => removeFromCart(item.id)} className="text-red-300 hover:text-red-500 ml-2">
                     <Trash2 size={18} />
                   </button>

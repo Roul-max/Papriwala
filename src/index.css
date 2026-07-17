@@ -49,3 +49,8 @@ html {
   animation: badge-flash 0.6s ease-in-out;
 }
 
+@keyframes slideDown {
+  from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+

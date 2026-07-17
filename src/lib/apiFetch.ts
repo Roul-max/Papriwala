@@ -15,7 +15,12 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
   if (role)  headers.set("X-User-Role",     role);
   if (token) headers.set("X-Session-Token", token);
 
-  const response = await fetch(input, { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(input, { ...init, headers });
+  } catch {
+    throw new Error("Network error — please check your connection.");
+  }
 
   // Server invalidated our session — force re-login
   if (response.status === 401) {

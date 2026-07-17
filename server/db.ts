@@ -9,7 +9,7 @@ if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
     process.env.SUPABASE_SERVICE_ROLE_KEY,
     { auth: { persistSession: false } }
   );
-  console.log("✅ Supabase connected:", process.env.SUPABASE_URL);
+  console.log("✅ Supabase connected.");
 } else {
   console.warn("⚠️  SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — using in-memory store.");
 }

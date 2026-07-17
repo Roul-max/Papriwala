@@ -80,6 +80,7 @@ const PUBLIC_PATHS = new Set([
   "/auth/set-password",
   "/auth/send-otp",
   "/auth/verify-otp",
+  "/auth/guest-login",
 ]);
 
 // Paths that are fully public (mobile menu portal — no admin session required)
@@ -104,8 +105,9 @@ function deriveModule(path: string, method: string): string {
   if (path.includes("categories"))                             return "Inventory";
   if (path.includes("orders"))                                 return "Orders";
   if (path.includes("expenses") || path.includes("dealers"))   return "Financial Reports";
-  if (path.includes("employees") || path.includes("attendance")) return "Employees";
+  if (path.includes("employees") || path.includes("attendance") || path.includes("employee-sessions")) return "Employees";
   if (path.includes("settings"))                               return "Settings";
+  if (path.includes("raw-material-purchases") || path.includes("notifications")) return "Financial Reports";
   return "POS Billing";
 }
 
@@ -126,7 +128,7 @@ export async function roleAuthMiddleware(req: Request, res: Response, next: Next
   (req as any).session = session;
   const { role } = session;
 
-  if (role === "Admin") return next();
+  if (role === "Admin" || role === "Customer") return next();
 
   const permissions: Record<string, Record<string, string>> = (db.settings as any)?.permissions?.[role] || {};
   const pathModule = deriveModule(req.path, req.method);

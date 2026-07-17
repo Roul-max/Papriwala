@@ -13,7 +13,21 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
 
-  app.use(express.json());
+  // ── Security headers ────────────────────────────────────────────────────────
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (process.env.NODE_ENV === "production") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+    next();
+  });
+
+  // ── Body parsing with size limit ────────────────────────────────────────────
+  app.use(express.json({ limit: "1mb" }));
 
   // API Routes
   app.use("/api", apiRoutes);
@@ -33,15 +47,25 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.use(express.static(distPath, { maxAge: "1d" }));
+    app.get("*", (_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  // ── Global error handler ────────────────────────────────────────────────────
+  app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error("[Unhandled Error]", err?.message || err);
+    res.status(500).json({ error: "Internal server error" });
   });
+
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT} [${process.env.NODE_ENV || "development"}]`);
+  });
+
+  // ── Graceful shutdown ───────────────────────────────────────────────────────
+  process.on("SIGTERM", () => { httpServer.close(() => process.exit(0)); });
+  process.on("SIGINT",  () => { httpServer.close(() => process.exit(0)); });
 }
 
-startServer();
+startServer().catch(err => { console.error("Failed to start server:", err); process.exit(1); });

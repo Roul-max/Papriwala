@@ -3,7 +3,7 @@ import { Package, AlertTriangle, XCircle, Search, Plus, X, Trash2, ArrowDownCirc
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
 
-type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; };
+type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; muted?: boolean; };
 type LogEntry = { id: string; type: "STOCK_IN" | "STOCK_OUT"; product_name: string; qty: number; reason: string; operator: string; timestamp: string; };
 
 const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs" };
@@ -70,6 +70,16 @@ export default function Inventory() {
     setShowAddModal(false);
     setAddForm({ ...EMPTY_PRODUCT });
     fetchAll();
+  };
+
+  const handleToggleMute = async (p: Product) => {
+    const updated = { ...p, muted: !p.muted };
+    await apiFetch(`/api/products/${p.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ muted: updated.muted }),
+    });
+    setProducts(prev => prev.map(x => x.id === p.id ? { ...x, muted: updated.muted } : x));
   };
 
   const handleDelete = async () => {
@@ -176,9 +186,12 @@ export default function Inventory() {
                   <td className="py-3 px-4 font-mono text-xs">{p.sku}</td>
                   <td className="py-3 px-4 font-bold">{p.current_stock_qty}</td>
                   <td className="py-3 px-4">
-                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${p.current_stock_qty === 0 ? "bg-red-100 text-red-700" : p.current_stock_qty <= p.safety_low_threshold ? "bg-yellow-100 text-yellow-700" : "bg-green-100 text-green-700"}`}>
-                      {p.current_stock_qty === 0 ? "Out of Stock" : p.current_stock_qty <= p.safety_low_threshold ? "Low Stock" : "In Stock"}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${p.current_stock_qty === 0 ? "bg-red-100 text-red-700" : p.current_stock_qty <= p.safety_low_threshold ? "bg-yellow-100 text-yellow-700" : "bg-green-100 text-green-700"}`}>
+                        {p.current_stock_qty === 0 ? "Out of Stock" : p.current_stock_qty <= p.safety_low_threshold ? "Low Stock" : "In Stock"}
+                      </span>
+                      {p.muted && <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">🔕 Muted</span>}
+                    </div>
                   </td>
                   <td className="py-3 px-4 text-right">
                     <div className="flex justify-end gap-1">
@@ -188,6 +201,9 @@ export default function Inventory() {
                             className="text-green-600 hover:bg-green-50 p-1.5 rounded" title="Stock In"><ArrowDownCircle size={16} /></button>
                           <button onClick={() => { setStockModal({ product: p, type: "out" }); setStockQty(""); setStockReason(""); setStockError(""); }}
                             className="text-orange-500 hover:bg-orange-50 p-1.5 rounded" title="Stock Out"><ArrowUpCircle size={16} /></button>
+                          <button onClick={() => handleToggleMute(p)}
+                            className={`p-1.5 rounded text-xs font-bold ${p.muted ? "text-gray-400 hover:bg-gray-50" : "text-blue-500 hover:bg-blue-50"}`}
+                            title={p.muted ? "Unmute notifications" : "Mute notifications"}>{p.muted ? "🔔" : "🔕"}</button>
                           <button onClick={() => { setDeleteTarget(p); setDeleteConfirm(false); }}
                             className="text-red-600 hover:bg-red-50 p-1.5 rounded" title="Delete"><Trash2 size={16} /></button>
                         </>

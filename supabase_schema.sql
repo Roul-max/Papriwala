@@ -210,9 +210,24 @@ create table if not exists gallery (
 
 -- Also add unit column to products if not exists
 alter table products add column if not exists unit text default 'pcs';
+-- Also add muted column to products (for notification mute feature)
+alter table products add column if not exists muted boolean default false;
 -- Also add created_by column to orders if not exists
 alter table orders add column if not exists created_by text;
 alter table orders add column if not exists payment_mode text;
+-- Add due_date and is_paid to raw_material_purchases
+alter table raw_material_purchases add column if not exists due_date date;
+alter table raw_material_purchases add column if not exists is_paid boolean default false;
+
+-- 16. Guest Customers (mobile portal users — phone-only registration)
+create table if not exists guest_customers (
+  id text primary key,
+  name text,
+  phone text unique not null,
+  is_new boolean default true,
+  created_at timestamptz default now()
+);
+alter table guest_customers disable row level security;
 
 -- Disable RLS on all tables (service_role key bypasses anyway, but this prevents 401s)
 alter table products        disable row level security;

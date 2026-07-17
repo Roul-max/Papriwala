@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { IndianRupee, ClipboardList, BoxesIcon, BarChart3, AlertTriangle, XOctagon, Users, Package, TrendingUp, ArrowRight } from "lucide-react";
+import { IndianRupee, ClipboardList, BarChart3, AlertTriangle, XOctagon, Users, Package, TrendingUp, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../../lib/apiFetch";
 
@@ -28,12 +28,11 @@ export default function AdminDashboard() {
 
   const cards = analytics
     ? [
-        { title: "Today's Sales",     value: analytics.totalSales,    icon: IndianRupee,   color: "text-green-600 bg-green-50" },
-        { title: "Today's Orders",    value: analytics.totalOrders,   icon: ClipboardList, color: "text-blue-600 bg-blue-50" },
-        { title: "Total Products",    value: analytics.totalProducts, icon: BoxesIcon,     color: "text-purple-600 bg-purple-50" },
-        { title: "Total Product Sale",value: totalUnitsSold,          icon: BarChart3,     color: "text-maroon bg-cream" },
-        { title: "Low Stock Items",   value: analytics.lowStock,      icon: AlertTriangle, color: "text-amber-600 bg-amber-50" },
-        { title: "Out of Stock Items",value: analytics.outOfStock,    icon: XOctagon,      color: "text-red-600 bg-red-50" },
+        { title: "Today's Sales",     value: `₹${Number(analytics.totalRevenue || 0).toFixed(0)}`, icon: IndianRupee,   color: "text-green-600 bg-green-50" },
+        { title: "Today's Orders",    value: analytics.totalOrders,                                 icon: ClipboardList, color: "text-blue-600 bg-blue-50" },
+        { title: "Total Product Sale",value: totalUnitsSold,                                        icon: BarChart3,     color: "text-maroon bg-cream" },
+        { title: "Low Stock Items",   value: analytics.lowStock,                                    icon: AlertTriangle, color: "text-amber-600 bg-amber-50" },
+        { title: "Out of Stock Items",value: analytics.outOfStock,                                  icon: XOctagon,      color: "text-red-600 bg-red-50" },
       ]
     : [];
 
@@ -47,7 +46,7 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6">
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {loading
           ? Array(6).fill(0).map((_, i) => (
               <div key={i} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 animate-pulse h-20" />
