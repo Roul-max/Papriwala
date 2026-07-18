@@ -302,11 +302,15 @@ router.get("/inventory-log", async (_req, res) => {
 });
 
 // ─── Orders ──────────────────────────────────────────────────────────────────
-router.get("/orders", async (_req, res) => {
-  res.json(await dbSelect("orders", db.orders));
+router.get("/orders", async (req, res) => {
+  const all = await dbSelect("orders", db.orders);
+  const sorted = all.sort((a: any, b: any) => new Date(b.timestamp ?? 0).getTime() - new Date(a.timestamp ?? 0).getTime());
+  const { customer_id } = req.query;
+  res.json(customer_id ? sorted.filter((o: any) => o.customer_id === customer_id) : sorted);
 });
 
 router.post("/orders", async (req, res) => {
+  const session = (req as any).session;
   const ts = Date.now();
   const newOrder = {
     ...req.body,
@@ -314,6 +318,38 @@ router.post("/orders", async (req, res) => {
     timestamp: new Date().toISOString(),
   };
   const saved = await dbInsert("orders", newOrder, db.orders);
+
+  // ── Deduct stock for each item in the order ───────────────────────────────
+  const products = await dbSelect("products", db.products);
+  for (const item of (saved.items || [])) {
+    const qty = Number(item.qty) || 1;
+    // Match product by name (case-insensitive)
+    const product = products.find((p: any) =>
+      p.name?.toLowerCase() === item.name?.toLowerCase()
+    );
+    if (!product) continue;
+    const newQty = Math.max(0, Number(product.current_stock_qty) - qty);
+    await dbUpdate("products", product.id, { current_stock_qty: newQty });
+    const local = db.products.find((p: any) => p.id === product.id);
+    if (local) local.current_stock_qty = newQty;
+    await dbInsert("inventory_log", {
+      id: crypto.randomUUID(),
+      type: "STOCK_OUT",
+      product_id: product.id,
+      product_name: product.name,
+      qty,
+      reason: `Order ${saved.id}`,
+      operator: session?.name || "Customer",
+      timestamp: new Date().toISOString(),
+    }, db.inventory_log);
+    // Fire alerts
+    if (newQty === 0) {
+      if (!local?.muted) broadcast({ type: "INVENTORY_DEPLETED", payload: { product_id: product.id, sku_code: product.sku, remaining_qty: 0 } });
+    } else if (newQty <= product.safety_low_threshold) {
+      if (!local?.muted) broadcast({ type: "LOW_STOCK_ALERT", payload: { product_id: product.id, product_name: product.name, sku_code: product.sku, remaining_qty: newQty } });
+    }
+  }
+
   if (saved.order_source !== "Direct POS") {
     broadcast({ type: "INBOUND_QR_ORDER", payload: { order_id: saved.id, table_number: saved.table_id || "Delivery", bill_amount: saved.grand_total } });
   }

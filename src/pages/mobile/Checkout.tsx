@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, CheckCircle2 } from "lucide-react";
 import { useCart } from "../../hooks/useCart";
+import { apiFetch } from "../../lib/apiFetch";
 
 export default function Checkout() {
   const navigate = useNavigate();
@@ -25,15 +26,17 @@ export default function Checkout() {
       // Small delay to allow UPI app to open before placing order
       await new Promise(r => setTimeout(r, 1500));
     }
-    await fetch("/api/orders", {
+    const customerId = localStorage.getItem("customerId") || null;
+    await apiFetch("/api/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         table_id: tableId,
         grand_total: total,
-        order_status: isCash ? "Pending" : "In-Preparation",
+        order_status: isCash ? "Pending" : "Paid",
         order_source: "QR Table Menu",
         payment_method: method,
+        customer_id: customerId,
         items: items.map(i => ({ name: i.name, size: i.size, price: i.price, qty: i.qty, note: i.note || "" })),
         tax_collected: (total / 1.05 * 0.05),
       })
@@ -84,7 +87,6 @@ export default function Checkout() {
                 {method === m.id && <div className="w-2.5 h-2.5 rounded-full bg-maroon" />}
               </div>
               <span className="font-semibold text-gray-800">{m.name}</span>
-              {m.id === "cash" && <span className="ml-auto text-xs text-orange-500 font-semibold">Pay Later</span>}
               {m.id === "upi" && <span className="ml-auto text-xs text-green-600 font-semibold">Instant</span>}
             </label>
           ))}

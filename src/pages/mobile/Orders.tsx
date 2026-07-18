@@ -10,8 +10,9 @@ export default function Orders() {
   const [tab, setTab] = useState<"live" | "history">("live");
 
   useEffect(() => {
-    apiFetch("/api/orders").then(r => r.json()).then(data => setOrders(Array.isArray(data) ? data : []));
-    // §3.6 — Device-local history from localStorage
+    const customerId = localStorage.getItem("customerId");
+    apiFetch(`/api/orders${customerId ? `?customer_id=${customerId}` : ""}`)
+      .then(r => r.json()).then(data => setOrders(Array.isArray(data) ? data : []));
     const saved = localStorage.getItem("orderHistory");
     if (saved) setLocalHistory(JSON.parse(saved));
   }, []);
@@ -47,7 +48,18 @@ export default function Orders() {
               <div key={i} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
                 <div className="flex justify-between items-center mb-3 border-b border-gray-100 pb-3">
                   <span className="font-bold text-gray-800">Order #{order.id || i + 1}</span>
-                  <span className="text-xs text-gray-500">{order.timestamp ? new Date(order.timestamp).toLocaleString() : ""}</span>
+                  <div className="flex items-center gap-2">
+                    {order.payment_method && (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        order.payment_method === "upi"  ? "bg-green-100 text-green-700" :
+                        order.payment_method === "card" ? "bg-blue-100 text-blue-700" :
+                        "bg-orange-100 text-orange-700"
+                      }`}>
+                        {order.payment_method === "upi" ? "UPI / QR" : order.payment_method === "card" ? "Card" : "Cash"}
+                      </span>
+                    )}
+                    <span className="text-xs text-gray-500">{order.timestamp ? new Date(order.timestamp).toLocaleString() : ""}</span>
+                  </div>
                 </div>
 
                 <div className="mb-5 mt-4">

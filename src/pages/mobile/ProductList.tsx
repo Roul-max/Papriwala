@@ -6,6 +6,7 @@ import { useWishlist } from "../../hooks/useWishlist";
 
 export default function ProductList() {
   const [products, setProducts] = useState<any[]>([]);
+  const [categoryName, setCategoryName] = useState("");
   const [sortOption, setSortOption] = useState<string>("default");
   const { id } = useParams();
   const navigate = useNavigate();
@@ -13,10 +14,23 @@ export default function ProductList() {
   const { addToCart } = useCart();
 
   useEffect(() => {
-    fetch("/api/products")
-      .then(res => res.json())
-      .then(data => setProducts(data));
-  }, []);
+    fetch("/api/categories")
+      .then(r => r.json())
+      .then(data => {
+        const all = Array.isArray(data) ? data : [];
+        const cat = all.find((c: any) => c.id === id);
+        const name = cat?.name || "";
+        setCategoryName(name);
+        return fetch("/api/products").then(r => r.json()).then(pdata => {
+          const prods = Array.isArray(pdata) ? pdata : [];
+          setProducts(prods.filter((p: any) =>
+            p.category_id === id ||
+            p.category === id ||
+            (name && p.category?.toLowerCase() === name.toLowerCase())
+          ));
+        });
+      });
+  }, [id]);
 
   const sortedProducts = [...products].sort((a, b) => {
     if (sortOption === "price-asc") return a.price - b.price;
@@ -33,7 +47,7 @@ export default function ProductList() {
           <button onClick={() => navigate(-1)} className="mr-4 text-maroon">
             <ChevronLeft size={24} />
           </button>
-          <h2 className="font-serif text-xl text-gold font-bold uppercase tracking-wider">SWEETS</h2>
+          <h2 className="font-serif text-xl text-gold font-bold uppercase tracking-wider">{categoryName || "Products"}</h2>
         </div>
       </div>
 
@@ -55,24 +69,29 @@ export default function ProductList() {
       </div>
 
       <div className="p-4 space-y-4">
+        {sortedProducts.length === 0 && (
+          <div className="text-center text-gray-400 py-16">
+            <p className="text-lg font-semibold">No products in this category yet</p>
+          </div>
+        )}
         {sortedProducts.map(product => (
           <div key={product.id} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 flex p-3 relative">
             <button 
               onClick={() => toggleWishlist(product.id)}
-              className={`absolute top-3 right-3 ${isInWishlist(product.id) ? 'text-maroon' : 'text-gray-300 hover:text-maroon'}`}
+              className={`absolute top-3 right-3 z-10 ${isInWishlist(product.id) ? 'text-maroon' : 'text-gray-300 hover:text-maroon'}`}
             >
               <Heart size={20} fill={isInWishlist(product.id) ? 'currentColor' : 'none'} />
             </button>
-            <div className="w-24 h-24 rounded-lg overflow-hidden shrink-0 bg-amber-50">
+            <Link to={`/product/${product.id}`} className="w-24 h-24 rounded-lg overflow-hidden shrink-0 bg-amber-50">
               {product.image
                 ? <img src={product.image} alt={product.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).src = "/cover.png"; }} />
                 : <img src="/cover.png" alt={product.name} className="w-full h-full object-cover" />}
-            </div>
+            </Link>
             <div className="ml-4 flex flex-col justify-between py-1 flex-1">
-              <div>
+              <Link to={`/product/${product.id}`}>
                 <h3 className="font-bold text-gray-800 pr-6 leading-tight">{product.name}</h3>
                 <p className="text-maroon font-semibold text-sm mt-1">₹{product.price} / kg</p>
-              </div>
+              </Link>
               <button onClick={() => addToCart(product)} className="self-end bg-maroon text-white text-xs font-bold px-4 py-1.5 rounded-full hover:bg-maroon-light">
                 Add
               </button>

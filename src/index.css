@@ -13,7 +13,7 @@
 }
 
 body {
-  @apply font-sans bg-cream-light text-slate-800 antialiased selection:bg-maroon/20 selection:text-maroon;
+  @apply font-sans bg-cream-light text-slate-800 antialiased selection:bg-maroon selection:text-cream;
 }
 
 /* Premium smooth scrolling and typography enhancements */

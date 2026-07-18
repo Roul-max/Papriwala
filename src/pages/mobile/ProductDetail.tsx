@@ -36,7 +36,10 @@ export default function ProductDetail() {
   };
 
   const handleAddToCart = () => {
-    addToCart(product, selectedSize || undefined, qty);
+    const size = selectedSize || "Regular";
+    const variantData = variants.find(v => v.size_label === size);
+    const finalPrice = variantData ? product.price * variantData.variant_price_modifier : product.price;
+    addToCart({ ...product, price: finalPrice }, size, qty);
     navigate("/cart");
   };
 

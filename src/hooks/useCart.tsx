@@ -167,7 +167,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
               <p className="font-bold text-gray-800 text-sm mb-3">Select Serving Size Volume Option:</p>
               <div className="space-y-2 mb-6">
                 {variants.map(v => (
-                  <label key={v.size_label} className={`flex items-center justify-between p-3 rounded-lg border-2 cursor-pointer transition-colors ${selectedSize === v.size_label ? 'border-maroon bg-maroon/5' : 'border-gray-200'}`}>
+                  <label key={v.size_label} onClick={() => setSelectedSize(v.size_label)} className={`flex items-center justify-between p-3 rounded-lg border-2 cursor-pointer transition-colors ${selectedSize === v.size_label ? 'border-maroon bg-maroon/5' : 'border-gray-200'}`}>
                     <div className="flex items-center gap-3">
                       <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${selectedSize === v.size_label ? 'border-maroon' : 'border-gray-300'}`}>
                         {selectedSize === v.size_label && <div className="w-2 h-2 rounded-full bg-maroon" />}

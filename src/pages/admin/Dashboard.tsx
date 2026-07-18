@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { IndianRupee, ClipboardList, BarChart3, AlertTriangle, XOctagon, Users, Package, TrendingUp, ArrowRight } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { IndianRupee, ClipboardList, BarChart3, AlertTriangle, XOctagon, Users, Package, TrendingUp, ArrowRight, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../../lib/apiFetch";
 
@@ -8,23 +8,33 @@ export default function AdminDashboard() {
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [totalUnitsSold, setTotalUnitsSold] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    Promise.all([
-      apiFetch("/api/analytics").then(r => r.json()),
-      apiFetch("/api/orders").then(r => r.json()),
-    ]).then(([a, o]) => {
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true); else setRefreshing(true);
+    try {
+      const [a, o] = await Promise.all([
+        apiFetch("/api/analytics").then(r => r.json()),
+        apiFetch("/api/orders").then(r => r.json()),
+      ]);
       setAnalytics(a);
       setRecentOrders(o.slice(0, 5));
-      // Total product units sold today (sum of all item qtys in today's paid orders)
       const today = new Date().toISOString().split("T")[0];
       const units = o
         .filter((ord: any) => ord.order_status === "Paid" && ord.timestamp?.startsWith(today))
         .reduce((sum: number, ord: any) => sum + (ord.items?.reduce((s: number, it: any) => s + (it.qty || 1), 0) || 0), 0);
       setTotalUnitsSold(units);
+    } finally {
       setLoading(false);
-    });
+      setRefreshing(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(() => fetchData(true), 15000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
   const cards = analytics
     ? [
@@ -46,7 +56,7 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6">
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 select-none">
         {loading
           ? Array(6).fill(0).map((_, i) => (
               <div key={i} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 animate-pulse h-20" />
@@ -69,13 +79,18 @@ export default function AdminDashboard() {
         <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-100 p-6">
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-serif text-xl text-maroon font-semibold">Recent Orders</h3>
-            <Link to="/admin/orders" className="flex items-center gap-1 text-sm text-maroon font-semibold hover:underline">
-              View All <ArrowRight size={14} />
-            </Link>
+            <div className="flex items-center gap-3">
+              <button onClick={() => fetchData(true)} className="text-gray-400 hover:text-maroon transition-colors">
+                <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
+              </button>
+              <Link to="/admin/orders" className="flex items-center gap-1 text-sm text-maroon font-semibold hover:underline">
+                View All <ArrowRight size={14} />
+              </Link>
+            </div>
           </div>
           {recentOrders.length === 0 ? (
             <div className="text-center text-gray-500 py-12 border-2 border-dashed border-gray-100 rounded-lg">
-              No orders yet today.
+              No recent orders found.
             </div>
           ) : (
             <div className="space-y-3">

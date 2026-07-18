@@ -1,13 +1,44 @@
 import { useEffect, useState, useRef } from "react";
-import { ChevronRight, ChevronLeft } from "lucide-react";
+import { ChevronRight, ChevronLeft, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useCart } from "../../hooks/useCart";
+
+const SLIDES = [
+  { image: "https://images.pexels.com/photos/1028714/pexels-photo-1028714.jpeg?auto=compress&cs=tinysrgb&w=800", label: "Premium Sweets",   sub: "Handcrafted with love" },
+  { image: "https://images.pexels.com/photos/4449068/pexels-photo-4449068.jpeg?auto=compress&cs=tinysrgb&w=800", label: "Fresh Namkeen",    sub: "Crispy & flavourful" },
+  { image: "https://images.pexels.com/photos/1775043/pexels-photo-1775043.jpeg?auto=compress&cs=tinysrgb&w=800", label: "Bakery Delights",  sub: "Baked fresh daily" },
+  { image: "https://images.pexels.com/photos/9609847/pexels-photo-9609847.jpeg?auto=compress&cs=tinysrgb&w=800", label: "Festival Specials", sub: "Order for every occasion" },
+];
 
 export default function Home() {
   const [categories, setCategories] = useState<any[]>([]);
   const [bestsellers, setBestsellers] = useState<any[]>([]);
   const [allProducts, setAllProducts] = useState<any[]>([]);
+  const [slideIndex, setSlideIndex] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<{ type: "product" | "category"; id: string; name: string; sub: string; image: string; to: string }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-advance slideshow every 3.5s
+  useEffect(() => {
+    const t = setInterval(() => setSlideIndex(i => (i + 1) % SLIDES.length), 3500);
+    return () => clearInterval(t);
+  }, []);
+
+  // Search filter — products + categories
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) { setSearchResults([]); return; }
+    const q = searchQuery.toLowerCase();
+    const matchedProducts = allProducts
+      .filter(p => p.name?.toLowerCase().includes(q) || p.category?.toLowerCase().includes(q))
+      .slice(0, 5)
+      .map(p => ({ type: "product" as const, id: p.id, name: p.name, sub: `₹${p.price}/kg`, image: p.image, to: `/product/${p.id}` }));
+    const matchedCats = categories
+      .filter(c => c.name?.toLowerCase().includes(q))
+      .slice(0, 3)
+      .map(c => ({ type: "category" as const, id: c.id, name: c.name, sub: "Browse category", image: c.image, to: `/category/${c.id}` }));
+    setSearchResults([...matchedCats, ...matchedProducts]);
+  }, [searchQuery, allProducts, categories]);
 
   useEffect(() => {
     fetch("/api/products")
@@ -55,10 +86,77 @@ export default function Home() {
 
   return (
     <div className="flex flex-col min-h-full space-y-6 pb-6 bg-cream-light">
-      {/* Hero Banner */}
-      <div className="w-full relative shrink-0 px-4 pt-4">
-        <div className="h-64 w-full relative rounded-3xl overflow-hidden shadow-md">
-          <img src="/cover.png" alt="Assorted Sweets" className="w-full h-full object-cover" />
+
+      {/* Search Bar */}
+      <div className="px-4 pt-4 relative">
+        <div className="relative">
+          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search sweets, namkeen, bakery..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="w-full pl-11 pr-4 py-3 bg-white border border-gray-200 rounded-2xl text-sm focus:outline-none focus:border-maroon shadow-sm"
+          />
+        </div>
+        {(searchResults.length > 0 || searchQuery.trim().length >= 2) && (
+          <div className="absolute left-4 right-4 top-full mt-1 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden">
+            {searchResults.length === 0 ? (
+              <div className="px-4 py-5 text-center text-sm text-gray-400">No results for "{searchQuery}"</div>
+            ) : (
+              searchResults.map(r => (
+                <Link
+                  key={r.type + r.id}
+                  to={r.to}
+                  onClick={() => { setSearchQuery(""); setSearchResults([]); }}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-cream-light border-b border-gray-50 last:border-0"
+                >
+                  {r.type === "category" ? (
+                    <div className="w-10 h-10 rounded-lg bg-maroon/10 flex items-center justify-center shrink-0">
+                      <span className="text-lg">🏪</span>
+                    </div>
+                  ) : (
+                    <img src={r.image || "/cover.png"} alt={r.name} className="w-10 h-10 rounded-lg object-cover shrink-0" onError={e => { (e.target as HTMLImageElement).src = "/cover.png"; }} />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-800 text-sm truncate">{r.name}</p>
+                    <p className="text-xs text-maroon font-bold">{r.sub}</p>
+                  </div>
+                  <span className="text-[10px] text-gray-400 shrink-0">{r.type === "category" ? "Category" : "Product"}</span>
+                </Link>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Hero Slideshow */}
+      <div className="w-full relative shrink-0 px-4">
+        <div className="h-52 w-full relative rounded-3xl overflow-hidden shadow-md">
+          {SLIDES.map((slide, i) => (
+            <div
+              key={i}
+              className="absolute inset-0 transition-opacity duration-700"
+              style={{ opacity: i === slideIndex ? 1 : 0 }}
+            >
+              <img src={slide.image} alt={slide.label} className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
+              <div className="absolute bottom-4 left-5">
+                <p className="text-white font-serif font-bold text-xl leading-tight">{slide.label}</p>
+                <p className="text-white/80 text-xs mt-0.5">{slide.sub}</p>
+              </div>
+            </div>
+          ))}
+          {/* Dot indicators */}
+          <div className="absolute bottom-3 right-4 flex gap-1.5">
+            {SLIDES.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setSlideIndex(i)}
+                className={`rounded-full transition-all duration-300 ${i === slideIndex ? "w-5 h-2 bg-white" : "w-2 h-2 bg-white/50"}`}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
@@ -77,7 +175,7 @@ export default function Home() {
           
           <div ref={scrollRef} className="flex space-x-4 overflow-x-auto pb-2 scrollbar-hide snap-x relative z-0">
             {categories.map(cat => (
-              <Link key={cat.id} to={`/categories`} className="flex flex-col items-center space-y-2 shrink-0 w-20 snap-start">
+              <Link key={cat.id} to={`/category/${cat.id}`} className="flex flex-col items-center space-y-2 shrink-0 w-20 snap-start">
                 <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-gold/50 shadow-sm bg-amber-50">
                   <img src={getCatImage(cat)} alt={cat.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).src = "/cover.png"; }} />
                 </div>

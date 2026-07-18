@@ -39,6 +39,14 @@ function relativeTime(ts: string): string {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
+function paymentLabel(order: Order): string {
+  const raw = (order as any).payment_method || order.payment_mode || "—";
+  if (raw === "upi")  return "UPI / QR";
+  if (raw === "card") return "Credit / Debit Card";
+  if (raw === "cash") return "Counter Cash";
+  return raw;
+}
+
 function printOrder(order: Order) {
   const w = window.open("", "", "height=900,width=400");
   if (!w) return;
@@ -67,7 +75,7 @@ function printOrder(order: Order) {
     <div style="text-align:center;font-size:10px">Main Road, Buxar, Bihar</div>
     ${dash}
     <div style="display:flex;justify-content:space-between;font-size:10px"><span>Order: ${order.id}</span><span>${dt}</span></div>
-    <div style="font-size:10px">Source: ${order.order_source || "—"} | Payment: ${order.payment_mode || "—"}</div>
+    <div style="font-size:10px">Source: ${order.order_source || "—"} | Payment: ${paymentLabel(order)}</div>
     ${order.created_by ? `<div style="font-size:10px">Cashier: ${order.created_by}</div>` : ""}
     ${dash}
     ${itemsHtml}
@@ -225,6 +233,7 @@ export default function AdminOrders() {
                 </span>
                 <span className="text-sm font-medium text-gray-700">Source: [{order.order_source}]</span>
                 {order.table_id && <span className="text-sm text-gray-600">Table: {order.table_id}</span>}
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">{paymentLabel(order)}</span>
                 <span className="text-sm text-gray-600">Items: {order.items?.length || 0}</span>
                 <span className="text-sm font-bold text-maroon">₹{Number(order.grand_total).toFixed(2)}</span>
               </div>
@@ -245,12 +254,7 @@ export default function AdminOrders() {
                     <Edit2 size={13} /> Edit
                   </button>
                 )}
-                {order.order_source !== "Direct POS" && (
-                  <button onClick={() => printOrder(order)}
-                    className="bg-green-50 hover:bg-green-100 text-green-700 px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1">
-                    <Printer size={13} /> QR Print
-                  </button>
-                )}
+
                 {!isReadOnly && order.order_status === "Pending" && (
                   <button onClick={() => handleSetReady(order.id)}
                     className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium flex items-center gap-2">

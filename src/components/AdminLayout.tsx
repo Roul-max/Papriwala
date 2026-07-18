@@ -232,7 +232,7 @@ export default function AdminLayout() {
 
       {/* Sidebar */}
       <aside className="w-64 bg-maroon text-cream-light flex flex-col fixed h-full z-10">
-        <div className="p-6 text-center border-b border-maroon-light">
+        <div className="p-6 text-center border-b border-maroon-light select-none">
           <div className="w-20 h-20 rounded-full border-2 border-gold mx-auto mb-3 flex items-center justify-center bg-cream-light overflow-hidden">
             <img src="/Logo.png" alt="Logo" className="w-full h-full object-contain p-1" />
           </div>
@@ -241,7 +241,7 @@ export default function AdminLayout() {
           <p className="text-[10px] text-cream/70 mt-1">SWEETS | NAMKEEN | BAKERY</p>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1 select-none">
           {navItems.map(item => (
             <Link
               key={item.name}
