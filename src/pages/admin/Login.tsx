@@ -128,7 +128,7 @@ export default function AdminLogin() {
           src="/cover.png"
           alt="Cover"
           className="absolute left-0 right-0 bottom-0 w-full z-0"
-          style={{ objectFit: "fill", maxHeight: "110%" }}
+          style={{ objectFit: "fill", maxHeight: "80%" }}
         />
       </div>
 
