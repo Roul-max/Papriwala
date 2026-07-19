@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { User, Camera, Lock, CheckCircle2, AlertCircle, Pencil, X } from "lucide-react";
+import { User, Camera, Lock, CheckCircle2, AlertCircle, Pencil, X, Trash2 } from "lucide-react";
 import { apiFetch } from "../../lib/apiFetch";
 
 export default function AdminProfile() {
@@ -29,6 +29,21 @@ export default function AdminProfile() {
     setDisplayName(savedName);
     setNameInput(savedName);
   }, []);
+
+  // ── Delete avatar ───────────────────────────────────────────────────────────
+  const handleDeleteAvatar = async () => {
+    setAvatar(null);
+    localStorage.removeItem("adminAvatar");
+    window.dispatchEvent(new Event("avatarChanged"));
+    const endpoint = isAdmin ? "/api/auth/update-avatar" : `/api/employees/${employeeId}`;
+    await apiFetch(endpoint, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ avatar: null }),
+    });
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 3000);
+  };
 
   // ── Photo upload ────────────────────────────────────────────────────────────
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,8 +127,8 @@ export default function AdminProfile() {
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
 
             {/* Avatar */}
-            <div className="relative mb-4 group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-              <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-cream-light bg-gray-50 flex items-center justify-center shadow-inner relative">
+            <div className="relative mb-4 group">
+              <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-cream-light bg-gray-50 flex items-center justify-center shadow-inner relative cursor-pointer" onClick={() => fileInputRef.current?.click()}>
                 {avatar
                   ? <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
                   : <User size={48} className="text-gray-300" />
@@ -123,6 +138,13 @@ export default function AdminProfile() {
                   <span className="text-white text-xs font-semibold">Change Photo</span>
                 </div>
               </div>
+              {avatar && (
+                <button onClick={handleDeleteAvatar}
+                  className="absolute bottom-0 right-0 bg-red-500 hover:bg-red-600 text-white p-1.5 rounded-full shadow-md border-2 border-white"
+                  title="Remove photo">
+                  <Trash2 size={13} />
+                </button>
+              )}
               <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
             </div>
             {saveSuccess && (

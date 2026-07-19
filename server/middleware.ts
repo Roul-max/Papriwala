@@ -20,14 +20,15 @@ export async function createSession(role: string, name: string, employeeId?: str
   const token = crypto.randomBytes(32).toString("hex");
   const session: Session = { role, name, employeeId, createdAt: Date.now() };
   if (supabase) {
-    await supabase.from("sessions").insert({
+    const { error } = await supabase.from("sessions").insert({
       token,
       role,
       name,
       employee_id: employeeId || null,
       created_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
-    }).then(() => {}).catch(() => {});
+    });
+    if (error) console.warn("[createSession] Supabase insert failed (sessions table may not exist):", error.message);
   }
   sessionStore.set(token, session);
   return token;
@@ -55,7 +56,9 @@ async function getSession(token: string): Promise<Session | null> {
   // Fallback: check Supabase (handles server restarts)
   if (supabase) {
     try {
-      const { data } = await supabase.from("sessions").select("*").eq("token", token).single();
+      const { data, error } = await supabase.from("sessions").select("*").eq("token", token).maybeSingle();
+      // If sessions table doesn't exist yet, treat as no session (don't crash)
+      if (error) { console.warn("[getSession] Supabase error:", error.message); return null; }
       if (!data) return null;
       if (new Date(data.expires_at).getTime() < Date.now()) {
         try { await supabase.from("sessions").delete().eq("token", token); } catch {}
@@ -81,6 +84,7 @@ const PUBLIC_PATHS = new Set([
   "/auth/send-otp",
   "/auth/verify-otp",
   "/auth/guest-login",
+  "/auth/guest-profile",
 ]);
 
 // Paths that are fully public (mobile menu portal — no admin session required)
@@ -115,6 +119,7 @@ function deriveModule(path: string, method: string): string {
 export async function roleAuthMiddleware(req: Request, res: Response, next: NextFunction) {
   const cleanPath = req.path.replace(/^\/api/, "");
 
+  // Always public — no token needed
   if (PUBLIC_PATHS.has(cleanPath) || PUBLIC_PATHS.has(req.path)) return next();
   if (req.path === "/auth/forbidden-alert" || cleanPath === "/auth/forbidden-alert") return next();
   if (req.method === "GET" && isPublicMobilePath(req.path)) return next();

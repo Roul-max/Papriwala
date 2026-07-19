@@ -18,6 +18,9 @@ export default function AdminCategories() {
   const [productModal, setProductModal] = useState<{ open: boolean; category: string } | null>(null);
   const [productForm, setProductForm] = useState({ ...EMPTY_PRODUCT });
   const [productError, setProductError] = useState("");
+  const [editProductModal, setEditProductModal] = useState<{ open: boolean; product: any } | null>(null);
+  const [editProductForm, setEditProductForm] = useState({ ...EMPTY_PRODUCT });
+  const [editProductError, setEditProductError] = useState("");
 
   const access = useAccess("Inventory");
   const isReadOnly = access === "Read-Only";
@@ -74,6 +77,26 @@ export default function AdminCategories() {
     setProductForm({ ...EMPTY_PRODUCT, category: catName });
     setProductError("");
     setProductModal({ open: true, category: catName });
+  };
+
+  const openEditProduct = (p: any) => {
+    setEditProductForm({ name: p.name, sku: p.sku || "", category: p.category, unit_purchase_cost: p.unit_purchase_cost ?? "", price: p.price ?? "", current_stock_qty: p.current_stock_qty ?? "", safety_low_threshold: p.safety_low_threshold ?? "5", unit: p.unit || "pcs", image: p.image || "" });
+    setEditProductError("");
+    setEditProductModal({ open: true, product: p });
+  };
+
+  const handleEditProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditProductError("");
+    if (!editProductForm.name || !editProductForm.price) { setEditProductError("Name and price are required."); return; }
+    await apiFetch(`/api/products/${editProductModal!.product.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...editProductForm, unit_purchase_cost: Number(editProductForm.unit_purchase_cost), price: Number(editProductForm.price), current_stock_qty: Number(editProductForm.current_stock_qty), safety_low_threshold: Number(editProductForm.safety_low_threshold) }),
+    });
+    setEditProductModal(null);
+    showToast("Product updated.");
+    load();
   };
 
   return (
@@ -146,7 +169,7 @@ export default function AdminCategories() {
                   ) : (
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
                       {catProducts.map(p => (
-                        <div key={p.id} className="bg-gray-50 rounded-lg border border-gray-100 overflow-hidden">
+                        <div key={p.id} className="bg-gray-50 rounded-lg border border-gray-100 overflow-hidden group relative">
                           <div className="h-20 bg-amber-50">
                             {p.image
                               ? <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
@@ -158,6 +181,12 @@ export default function AdminCategories() {
                             <p className="text-maroon font-bold text-xs">₹{p.price}</p>
                             <p className="text-gray-400 text-[10px]">Stock: {p.current_stock_qty}</p>
                           </div>
+                          {!isReadOnly && (
+                            <button onClick={() => openEditProduct(p)}
+                              className="absolute top-1 right-1 bg-white/90 hover:bg-blue-50 text-blue-600 p-1 rounded shadow opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Edit2 size={12} />
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -239,6 +268,51 @@ export default function AdminCategories() {
               {productError && <p className="text-red-500 text-sm">{productError}</p>}
               <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">
                 Add Product
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Product Modal */}
+      {editProductModal?.open && (
+        <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl shrink-0">
+              <h3 className="font-bold text-maroon text-lg">Edit Product</h3>
+              <button onClick={() => setEditProductModal(null)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+            </div>
+            <form onSubmit={handleEditProduct} className="p-5 space-y-3 overflow-y-auto flex-1">
+              {[
+                { label: "Product Name", key: "name", type: "text" },
+                { label: "SKU Code", key: "sku", type: "text" },
+                { label: "Unit (e.g. kg, pcs, ltr)", key: "unit", type: "text" },
+                { label: "Purchase Cost (₹)", key: "unit_purchase_cost", type: "number" },
+                { label: "Selling Price (₹)", key: "price", type: "number" },
+                { label: "Current Stock Qty", key: "current_stock_qty", type: "number" },
+                { label: "Safety Low Threshold", key: "safety_low_threshold", type: "number" },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">{f.label}</label>
+                  <input type={f.type} value={(editProductForm as any)[f.key]}
+                    onChange={e => setEditProductForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+                </div>
+              ))}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Product Image URL</label>
+                <input type="text" value={editProductForm.image}
+                  onChange={e => setEditProductForm(prev => ({ ...prev, image: e.target.value }))}
+                  placeholder="https://..."
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+                {editProductForm.image && (
+                  <img src={editProductForm.image} alt="preview" className="mt-2 h-24 w-full object-cover rounded-lg border border-gray-200"
+                    onError={e => (e.currentTarget.style.display = "none")} />
+                )}
+              </div>
+              {editProductError && <p className="text-red-500 text-sm">{editProductError}</p>}
+              <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">
+                Save Changes
               </button>
             </form>
           </div>

@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
-import { ChevronLeft, User, LogOut, Camera, Edit2, Check } from "lucide-react";
+import { ChevronLeft, User, LogOut, Camera, Edit2, Check, Trash2 } from "lucide-react";
 import React, { useState, useRef, useEffect } from "react";
+
 export default function Profile() {
   const navigate = useNavigate();
   const [avatar, setAvatar] = useState<string | null>(null);
@@ -12,45 +13,130 @@ export default function Profile() {
   const [tempName, setTempName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const customerRole  = localStorage.getItem("customerRole");
-    const customerName  = localStorage.getItem("customerName");
-    const savedAvatar   = localStorage.getItem("customerAvatar");
-    const savedPhone    = localStorage.getItem("employeePhone") || "";
+  // Determine session type once on mount
+  const isCustomer = !!localStorage.getItem("customerRole");
+  const isAdmin    = !isCustomer && !!localStorage.getItem("adminRole");
 
-    if (customerRole && customerName) {
-      setName(customerName);
-      setRole(customerRole);
-      setPhone(savedPhone);
-      if (savedAvatar) setAvatar(savedAvatar);
-      if (customerRole === "Customer") setIsNewCustomer(localStorage.getItem("isNewCustomer") === "true");
-    } else {
-      if (savedAvatar) setAvatar(savedAvatar);
+  useEffect(() => {
+    if (isCustomer) {
+      setName(localStorage.getItem("customerName") || "Guest");
+      setRole(localStorage.getItem("customerRole") || "");
+      setPhone(localStorage.getItem("employeePhone") || "");
+      const av = localStorage.getItem("customerAvatar");
+      if (av) setAvatar(av);
+      setIsNewCustomer(localStorage.getItem("isNewCustomer") === "true");
+    } else if (isAdmin) {
+      setName(localStorage.getItem("adminName") || "Admin");
+      setRole(localStorage.getItem("adminRole") || "");
+      const av = localStorage.getItem("adminAvatar");
+      if (av) setAvatar(av);
     }
   }, []);
+
+  const persistCustomerProfile = async (updatedName?: string, updatedAvatar?: string | null) => {
+    const customerId = localStorage.getItem("customerId");
+    if (!customerId) return;
+    try {
+      const token = localStorage.getItem("customerToken") || "";
+      const res = await fetch("/api/auth/guest-profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { "X-Session-Token": token, "X-User-Role": "Customer" } : {}) },
+        body: JSON.stringify({
+          customer_id: customerId,
+          ...(updatedName !== undefined ? { name: updatedName } : {}),
+          ...(updatedAvatar !== undefined ? { avatar: updatedAvatar } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error("[guest-profile] save failed:", res.status, err);
+      }
+    } catch (e) {
+      console.error("[guest-profile] network error:", e);
+    }
+  };
+
+  const handleDeleteAvatar = () => {
+    setAvatar(null);
+    if (isCustomer) {
+      localStorage.removeItem("customerAvatar");
+      persistCustomerProfile(undefined, null);
+      window.dispatchEvent(new Event("customerProfileUpdated"));
+    } else if (isAdmin) {
+      localStorage.removeItem("adminAvatar");
+      window.dispatchEvent(new Event("avatarChanged"));
+    }
+  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const b64 = reader.result as string;
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const SIZE = 200;
+      canvas.width = SIZE; canvas.height = SIZE;
+      const ctx = canvas.getContext("2d")!;
+      // crop to square from center
+      const min = Math.min(img.width, img.height);
+      const sx = (img.width - min) / 2;
+      const sy = (img.height - min) / 2;
+      ctx.drawImage(img, sx, sy, min, min, 0, 0, SIZE, SIZE);
+      URL.revokeObjectURL(url);
+      const b64 = canvas.toDataURL("image/jpeg", 0.7);
       setAvatar(b64);
-      localStorage.setItem("customerAvatar", b64);
-      window.dispatchEvent(new Event("customerProfileUpdated"));
+      if (isCustomer) {
+        localStorage.setItem("customerAvatar", b64);
+        persistCustomerProfile(undefined, b64);
+        window.dispatchEvent(new Event("customerProfileUpdated"));
+      } else if (isAdmin) {
+        localStorage.setItem("adminAvatar", b64);
+        window.dispatchEvent(new Event("avatarChanged"));
+      }
     };
-    reader.readAsDataURL(file);
+    img.src = url;
   };
 
   const handleNameSave = () => {
-    if (tempName.trim()) {
-      const trimmed = tempName.trim();
+    const trimmed = tempName.trim();
+    if (trimmed) {
       setName(trimmed);
-      localStorage.setItem("customerName", trimmed);
-      localStorage.setItem("adminName", trimmed);
-      window.dispatchEvent(new Event("customerProfileUpdated"));
+      if (isCustomer) {
+        localStorage.setItem("customerName", trimmed);
+        persistCustomerProfile(trimmed, undefined);
+        window.dispatchEvent(new Event("customerProfileUpdated"));
+      } else if (isAdmin) {
+        localStorage.setItem("adminName", trimmed);
+        window.dispatchEvent(new Event("avatarChanged"));
+      }
     }
     setIsEditingName(false);
+  };
+
+  const handleLogout = () => {
+    if (isCustomer) {
+      const token = localStorage.getItem("customerToken") || "";
+      if (token) fetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token, "X-User-Role": "Customer" } }).catch(() => {});
+      ["customerRole","customerName","customerToken","customerId","customerAvatar","employeePhone","isNewCustomer","orderHistory"].forEach(k => localStorage.removeItem(k));
+      sessionStorage.clear();
+      navigate("/login");
+    } else if (isAdmin) {
+      const token = localStorage.getItem("sessionToken") || "";
+      if (token) fetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token } }).catch(() => {});
+      ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
+      sessionStorage.clear();
+      navigate("/admin/login");
+    }
+  };
+
+  const roleBadge = () => {
+    if (isCustomer) {
+      if (isNewCustomer) return <span className="bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">🎉 New Customer</span>;
+      return <span className="bg-maroon/10 text-maroon text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">Returning Customer</span>;
+    }
+    if (role) return <span className="bg-maroon/10 text-maroon text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">{role}</span>;
+    return null;
   };
 
   return (
@@ -64,14 +150,18 @@ export default function Profile() {
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 flex flex-col items-center">
           <div className="relative mb-4">
             <div className="w-24 h-24 bg-maroon rounded-full flex items-center justify-center text-gold border-4 border-cream-light shadow-inner overflow-hidden">
-              {avatar
-                ? <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
-                : <User size={48} />}
+              {avatar ? <img src={avatar} alt="Profile" className="w-full h-full object-cover" /> : <User size={48} />}
             </div>
             <button onClick={() => fileInputRef.current?.click()}
               className="absolute bottom-0 right-0 bg-gold text-white p-2 rounded-full shadow-md border-2 border-white">
               <Camera size={16} />
             </button>
+            {avatar && (
+              <button onClick={handleDeleteAvatar}
+                className="absolute bottom-0 left-0 bg-red-500 text-white p-2 rounded-full shadow-md border-2 border-white">
+                <Trash2 size={14} />
+              </button>
+            )}
             <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
           </div>
 
@@ -93,48 +183,38 @@ export default function Profile() {
             </div>
           )}
 
-          {role === "Customer" && isNewCustomer && (
-            <span className="bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">🎉 New Customer</span>
-          )}
-          {role && role !== "Customer" && (
-            <span className="bg-maroon/10 text-maroon text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">{role}</span>
-          )}
-          {role === "Customer" && !isNewCustomer && (
-            <span className="bg-maroon/10 text-maroon text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">Returning Customer</span>
-          )}
+          {roleBadge()}
+
           {phone && (
             <p className="text-gray-500 text-sm mb-4">+91 {phone.slice(0,5)} {phone.slice(5)}</p>
           )}
 
-          <button onClick={() => {
-            const token = localStorage.getItem("customerToken") || "";
-            if (token) fetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token, "X-User-Role": "Customer" } }).catch(() => {});
-            ["customerRole","customerName","customerToken","customerId","customerAvatar","employeePhone","isNewCustomer","orderHistory"].forEach(k => localStorage.removeItem(k));
-            sessionStorage.clear();
-            navigate("/login");
-          }} className="w-full bg-red-50 text-red-600 font-bold py-3 rounded-xl hover:bg-red-100 transition-colors border border-red-100 flex items-center justify-center gap-2 mt-2">
+          <button onClick={handleLogout}
+            className="w-full bg-red-50 text-red-600 font-bold py-3 rounded-xl hover:bg-red-100 transition-colors border border-red-100 flex items-center justify-center gap-2 mt-2">
             <LogOut size={20} /> Logout
           </button>
         </div>
 
-        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-          <h4 className="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wider">Preferences</h4>
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="font-semibold text-gray-800">Order Notifications</p>
-              <p className="text-xs text-gray-500 mt-1">Get updates about your order status</p>
+        {isCustomer && (
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+            <h4 className="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wider">Preferences</h4>
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="font-semibold text-gray-800">Order Notifications</p>
+                <p className="text-xs text-gray-500 mt-1">Get updates about your order status</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer"
+                  defaultChecked={localStorage.getItem("notificationsEnabled") !== "false"}
+                  onChange={e => {
+                    localStorage.setItem("notificationsEnabled", e.target.checked.toString());
+                    window.dispatchEvent(new Event("notificationsPreferenceChanged"));
+                  }} />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-maroon"></div>
+              </label>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" className="sr-only peer"
-                defaultChecked={localStorage.getItem("notificationsEnabled") !== "false"}
-                onChange={e => {
-                  localStorage.setItem("notificationsEnabled", e.target.checked.toString());
-                  window.dispatchEvent(new Event("notificationsPreferenceChanged"));
-                }} />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-maroon"></div>
-            </label>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

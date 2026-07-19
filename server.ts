@@ -27,7 +27,73 @@ async function startServer() {
   });
 
   // ── Body parsing with size limit ────────────────────────────────────────────
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "5mb" }));
+
+  // ── Guest profile — registered directly, never blocked by any middleware ────
+  app.patch("/api/auth/guest-profile", async (req: express.Request, res: express.Response) => {
+    const { db, supabase } = await import("./server/db.js");
+    const { customer_id, name, avatar } = req.body;
+    if (!customer_id) { res.status(400).json({ error: "customer_id required" }); return; }
+    if (!db.guest_customers) db.guest_customers = [];
+    const patch: any = {};
+    if (name !== undefined)   patch.name   = name.replace(/[<>"'`;]/g, "").trim().slice(0, 500);
+    if (avatar !== undefined) patch.avatar = avatar;
+    if (Object.keys(patch).length === 0) { res.json({ success: true }); return; }
+    const mem = db.guest_customers.find((c: any) => c.id === customer_id);
+    if (mem) Object.assign(mem, patch);
+    if (supabase) {
+      const { error } = await supabase.from("guest_customers").update(patch).eq("id", customer_id);
+      if (error) {
+        console.error("[guest-profile] Supabase update failed:", error.message);
+        res.status(500).json({ error: error.message }); return;
+      }
+      console.log(`[guest-profile] Saved for ${customer_id}: name=${patch.name ?? "-"} avatar=${patch.avatar ? "yes" : "-"}`);
+    }
+    res.json({ success: true });
+  });
+
+  app.post("/api/auth/guest-login", async (req: express.Request, res: express.Response) => {
+    const { db, supabase } = await import("./server/db.js");
+    const { createSession } = await import("./server/middleware.js");
+    const phone = (req.body.phone ?? "").trim();
+    if (!phone || !/^\d{10}$/.test(phone)) { res.status(400).json({ error: "Valid 10-digit phone required" }); return; }
+    if (!db.guest_customers) db.guest_customers = [];
+    let customer: any = null;
+    let isNew = false;
+    if (supabase) {
+      const { data, error } = await supabase.from("guest_customers").select("*").eq("phone", phone).maybeSingle();
+      if (error) console.error("[guest-login] Supabase lookup error:", error.message);
+      if (data) {
+        customer = data;
+        const idx = db.guest_customers.findIndex((c: any) => c.id === data.id);
+        if (idx >= 0) db.guest_customers[idx] = data; else db.guest_customers.push(data);
+        console.log(`[guest-login] Returning: ${data.name} | avatar: ${data.avatar ? "yes" : "no"}`);
+      } else {
+        isNew = true;
+        const newCust = { id: `CUST-${Date.now()}`, name: "Customer", phone, avatar: null, created_at: new Date().toISOString() };
+        const { data: inserted, error: insertErr } = await supabase.from("guest_customers").insert(newCust).select().single();
+        if (insertErr) {
+          console.error("[guest-login] Insert failed:", insertErr.message);
+          const { data: refetched } = await supabase.from("guest_customers").select("*").eq("phone", phone).maybeSingle();
+          customer = refetched || newCust;
+          if (refetched) isNew = false;
+        } else {
+          customer = inserted || newCust;
+        }
+        const idx = db.guest_customers.findIndex((c: any) => c.id === customer.id);
+        if (idx >= 0) db.guest_customers[idx] = customer; else db.guest_customers.push(customer);
+      }
+    } else {
+      customer = db.guest_customers.find((c: any) => c.phone === phone) || null;
+      if (!customer) {
+        isNew = true;
+        customer = { id: `CUST-${Date.now()}`, name: "Customer", phone, avatar: null, created_at: new Date().toISOString() };
+        db.guest_customers.push(customer);
+      }
+    }
+    const token = await createSession("Customer", customer.name, customer.id);
+    res.json({ success: true, customer_id: customer.id, name: customer.name, avatar: customer.avatar || null, phone, is_new: isNew, sessionToken: token });
+  });
 
   // API Routes
   app.use("/api", apiRoutes);

@@ -9,7 +9,9 @@ export default function MobileLayout() {
   const cartCount = items.length;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
-  const [avatar, setAvatar] = useState<string | null>(localStorage.getItem("customerAvatar"));
+  const [avatar, setAvatar] = useState<string | null>(
+    localStorage.getItem("customerAvatar") || localStorage.getItem("adminAvatar")
+  );
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -17,14 +19,18 @@ export default function MobileLayout() {
     if (tableId) sessionStorage.setItem("qr_table_id", tableId);
 
     const handleResize = () => setIsDesktop(window.innerWidth >= 768);
-    const handleProfileUpdate = () => setAvatar(localStorage.getItem("customerAvatar"));
+    const handleProfileUpdate = () => setAvatar(
+      localStorage.getItem("customerAvatar") || localStorage.getItem("adminAvatar")
+    );
 
     window.addEventListener("resize", handleResize);
     window.addEventListener("customerProfileUpdated", handleProfileUpdate);
+    window.addEventListener("avatarChanged", handleProfileUpdate);
 
     return () => {
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("customerProfileUpdated", handleProfileUpdate);
+      window.removeEventListener("avatarChanged", handleProfileUpdate);
     };
   }, []);
 

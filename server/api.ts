@@ -138,31 +138,81 @@ router.post("/auth/verify-otp", async (req, res) => {
 // Guest login — mobile customers enter phone only, auto-registered as new customer
 router.post("/auth/guest-login", async (req, res) => {
   const phone = (req.body.phone ?? "").trim();
-  const name  = sanitize((req.body.name  ?? "").trim());
   if (!phone || !/^\d{10}$/.test(phone)) return res.status(400).json({ error: "Valid 10-digit phone required" });
 
-  // Check if customer already exists in employees (guest customers stored separately)
   if (!db.guest_customers) db.guest_customers = [];
-  let customer = db.guest_customers.find((c: any) => c.phone === phone);
+
+  let customer: any = null;
   let isNew = false;
 
-  if (!customer) {
-    isNew = true;
-    customer = { id: `CUST-${Date.now()}`, name: name || "Customer", phone, is_new: true, created_at: new Date().toISOString() };
-    db.guest_customers.push(customer);
-    // Persist to Supabase if available
-    if (supabase) {
-      try { await supabase.from("guest_customers").upsert(customer); } catch {}
+  if (supabase) {
+    // Always fetch from Supabase — source of truth for name + avatar
+    const { data, error } = await supabase.from("guest_customers").select("*").eq("phone", phone).maybeSingle();
+    if (error) console.error("[guest-login] Supabase lookup error:", error.message);
+
+    if (data) {
+      // Returning customer — sync to memory
+      customer = data;
+      const idx = db.guest_customers.findIndex((c: any) => c.id === data.id);
+      if (idx >= 0) db.guest_customers[idx] = data; else db.guest_customers.push(data);
+      console.log(`[guest-login] Returning customer: ${data.name} | avatar: ${data.avatar ? 'yes' : 'no'}`);
+    } else {
+      // New customer — insert into Supabase
+      isNew = true;
+      const newCust = { id: `CUST-${Date.now()}`, name: "Customer", phone, avatar: null, created_at: new Date().toISOString() };
+      const { data: inserted, error: insertErr } = await supabase.from("guest_customers").insert(newCust).select().single();
+      if (insertErr) {
+        console.error("[guest-login] Insert failed:", insertErr.message);
+        // Conflict: phone already exists — re-fetch
+        const { data: refetched } = await supabase.from("guest_customers").select("*").eq("phone", phone).maybeSingle();
+        customer = refetched || newCust;
+        if (refetched) isNew = false;
+      } else {
+        customer = inserted || newCust;
+      }
+      const idx = db.guest_customers.findIndex((c: any) => c.id === customer.id);
+      if (idx >= 0) db.guest_customers[idx] = customer; else db.guest_customers.push(customer);
+      console.log(`[guest-login] New customer created: ${customer.id}`);
     }
-  } else if (name && name !== customer.name) {
-    customer.name = name;
-    if (supabase) {
-      try { await supabase.from("guest_customers").update({ name }).eq("id", customer.id); } catch {}
+  } else {
+    // No Supabase — use in-memory
+    customer = db.guest_customers.find((c: any) => c.phone === phone) || null;
+    if (!customer) {
+      isNew = true;
+      customer = { id: `CUST-${Date.now()}`, name: "Customer", phone, avatar: null, created_at: new Date().toISOString() };
+      db.guest_customers.push(customer);
     }
   }
 
   const token = await createSession("Customer", customer.name, customer.id);
-  res.json({ success: true, customer_id: customer.id, name: customer.name, phone, is_new: isNew, sessionToken: token });
+  res.json({ success: true, customer_id: customer.id, name: customer.name, avatar: customer.avatar || null, phone, is_new: isNew, sessionToken: token });
+});
+
+// Update guest customer name and/or avatar — persists across logins
+router.patch("/auth/guest-profile", async (req, res) => {
+  const { customer_id, name, avatar } = req.body;
+  if (!customer_id) return res.status(400).json({ error: "customer_id required" });
+  if (!db.guest_customers) db.guest_customers = [];
+
+  const patch: any = {};
+  if (name !== undefined)   patch.name   = sanitize(name);
+  if (avatar !== undefined) patch.avatar = avatar;
+  if (Object.keys(patch).length === 0) return res.json({ success: true });
+
+  // Update in-memory (if present)
+  const mem = db.guest_customers.find((c: any) => c.id === customer_id);
+  if (mem) Object.assign(mem, patch);
+
+  // Always update Supabase — this is the source of truth
+  if (supabase) {
+    const { error } = await supabase.from("guest_customers").update(patch).eq("id", customer_id);
+    if (error) {
+      console.error("[guest-profile] Supabase update failed:", error.message);
+      return res.status(500).json({ error: error.message });
+    }
+    console.log(`[guest-profile] Saved for ${customer_id}: name=${patch.name ?? '-'} avatar=${patch.avatar ? 'yes' : '-'}`);
+  }
+  res.json({ success: true });
 });
 
 router.post("/auth/forbidden-alert", (req, res) => {
@@ -696,19 +746,28 @@ router.delete("/notifications", async (_req, res) => {
 
 // ─── Analytics ───────────────────────────────────────────────────────────────
 router.get("/analytics", async (_req, res) => {
-  const today = new Date().toISOString().split("T")[0];
+  // Use IST (UTC+5:30) for "today" so metrics match India time
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const nowIST = new Date(Date.now() + istOffset);
+  const today = nowIST.toISOString().split("T")[0]; // YYYY-MM-DD in IST
+
   const [allOrders, allProducts] = await Promise.all([
     dbSelect("orders", db.orders),
     dbSelect("products", db.products),
   ]);
 
-  const todayOrders = allOrders.filter((o: any) => o.timestamp?.startsWith(today));
-  const paidOrders  = todayOrders.filter((o: any) => o.order_status === "Paid");
+  // Match orders whose IST date equals today
+  const todayOrders = allOrders.filter((o: any) => {
+    if (!o.timestamp) return false;
+    const orderIST = new Date(new Date(o.timestamp).getTime() + istOffset);
+    return orderIST.toISOString().startsWith(today);
+  });
+  const paidOrders = todayOrders.filter((o: any) => o.order_status === "Paid");
 
   res.json({
     totalRevenue:  paidOrders.reduce((s: number, o: any) => s + Number(o.grand_total), 0),
     totalSales:    paidOrders.length,
-    totalOrders:   paidOrders.length,
+    totalOrders:   todayOrders.length,
     totalProducts: allProducts.length,
     lowStock:      allProducts.filter((p: any) => p.current_stock_qty > 0 && p.current_stock_qty <= p.safety_low_threshold).length,
     outOfStock:    allProducts.filter((p: any) => p.current_stock_qty === 0).length,

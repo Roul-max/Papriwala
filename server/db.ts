@@ -43,6 +43,7 @@ export const db: any = {
   attendance: [],
   orders: [],
   inventory_log: [] as any[],
+  guest_customers: [] as any[],
   adminPasswordHash: "",
   settings: {
     permissions: {
@@ -90,6 +91,43 @@ export async function bootstrapDb() {
     }
   } catch {
     console.warn("⚠️  Could not load settings from Supabase.");
+  }
+
+  try {
+    const { data } = await supabase.from("guest_customers").select("*");
+    if (data && data.length > 0) {
+      db.guest_customers = data;
+      console.log(`✅ Loaded ${data.length} guest customers from Supabase.`);
+    } else {
+      db.guest_customers = [];
+    }
+  } catch {
+    db.guest_customers = [];
+    console.warn("⚠️  Could not load guest_customers from Supabase.");
+  }
+
+  // Load active sessions into memory (handles Render restarts)
+  try {
+    const { data, error } = await supabase
+      .from("sessions")
+      .select("*")
+      .gt("expires_at", new Date().toISOString());
+    if (error) {
+      console.warn("⚠️  sessions table not found — run the CREATE TABLE SQL in Supabase. Sessions will be in-memory only.");
+    } else if (data) {
+      const { sessionStore } = await import("./middleware.js");
+      for (const row of data) {
+        sessionStore.set(row.token, {
+          role: row.role,
+          name: row.name,
+          employeeId: row.employee_id,
+          createdAt: new Date(row.created_at).getTime(),
+        });
+      }
+      console.log(`✅ Restored ${data.length} active sessions from Supabase.`);
+    }
+  } catch {
+    console.warn("⚠️  Could not load sessions from Supabase.");
   }
 }
 
