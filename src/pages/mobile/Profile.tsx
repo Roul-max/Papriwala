@@ -1,8 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, User, LogOut, Camera, Edit2, Check } from "lucide-react";
 import React, { useState, useRef, useEffect } from "react";
-import { apiFetch } from "../../lib/apiFetch";
-
 export default function Profile() {
   const navigate = useNavigate();
   const [avatar, setAvatar] = useState<string | null>(null);
@@ -110,7 +108,7 @@ export default function Profile() {
 
           <button onClick={() => {
             const token = localStorage.getItem("customerToken") || "";
-            if (token) apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+            if (token) fetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token, "X-User-Role": "Customer" } }).catch(() => {});
             ["customerRole","customerName","customerToken","customerId","customerAvatar","employeePhone","isNewCustomer","orderHistory"].forEach(k => localStorage.removeItem(k));
             sessionStorage.clear();
             navigate("/login");
