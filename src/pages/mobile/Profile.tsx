@@ -15,22 +15,19 @@ export default function Profile() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const adminRole   = localStorage.getItem("adminRole");
-    const adminName   = localStorage.getItem("adminName");
-    const adminAvatar = localStorage.getItem("adminAvatar");
-    const savedAvatar = localStorage.getItem("customerAvatar");
-    const savedName   = localStorage.getItem("customerName");
-    const savedPhone  = localStorage.getItem("employeePhone") || "";
+    const customerRole  = localStorage.getItem("customerRole");
+    const customerName  = localStorage.getItem("customerName");
+    const savedAvatar   = localStorage.getItem("customerAvatar");
+    const savedPhone    = localStorage.getItem("employeePhone") || "";
 
-    if (adminRole && adminName) {
-      setName(adminName);
-      setRole(adminRole);
+    if (customerRole && customerName) {
+      setName(customerName);
+      setRole(customerRole);
       setPhone(savedPhone);
-      if (adminAvatar) setAvatar(adminAvatar);
-      if (adminRole === "Customer") setIsNewCustomer(localStorage.getItem("isNewCustomer") === "true");
+      if (savedAvatar) setAvatar(savedAvatar);
+      if (customerRole === "Customer") setIsNewCustomer(localStorage.getItem("isNewCustomer") === "true");
     } else {
       if (savedAvatar) setAvatar(savedAvatar);
-      if (savedName)   setName(savedName);
     }
   }, []);
 
@@ -112,9 +109,10 @@ export default function Profile() {
           )}
 
           <button onClick={() => {
-            const token = localStorage.getItem("sessionToken") || "";
+            const token = localStorage.getItem("customerToken") || "";
             if (token) apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
-            localStorage.clear(); sessionStorage.clear();
+            ["customerRole","customerName","customerToken","customerId","customerAvatar","employeePhone","isNewCustomer","orderHistory"].forEach(k => localStorage.removeItem(k));
+            sessionStorage.clear();
             navigate("/login");
           }} className="w-full bg-red-50 text-red-600 font-bold py-3 rounded-xl hover:bg-red-100 transition-colors border border-red-100 flex items-center justify-center gap-2 mt-2">
             <LogOut size={20} /> Logout

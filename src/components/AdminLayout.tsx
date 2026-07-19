@@ -207,7 +207,7 @@ export default function AdminLayout() {
   const handleLogout = () => {
     const token = localStorage.getItem("sessionToken") || "";
     if (token) apiFetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token } }).catch(() => {});
-    localStorage.clear();
+    ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
     sessionStorage.clear();
     setNotifications([]);
     setUnreadCount(0);
