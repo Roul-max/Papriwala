@@ -167,15 +167,12 @@ export default function AdminOrders() {
     })
     .sort((a, b) => (b.timestamp ? new Date(b.timestamp).getTime() : 0) - (a.timestamp ? new Date(a.timestamp).getTime() : 0));
 
-  const liveQueue    = filteredOrders.filter(o => o.order_status !== "Paid").length;
   const totalPrepared = filteredOrders.filter(o => ["Ready to Serve", "Paid"].includes(o.order_status)).length;
 
   const metrics = [
     { label: "Total Daily Orders", val: String(analytics.totalOrders) },
     { label: "Gross Revenue",      val: `₹${analytics.totalRevenue.toFixed(0)}` },
     { label: "Total Prepared",     val: String(totalPrepared) },
-    { label: "Live Queue",         val: String(liveQueue) },
-    { label: "Avg Prep Time",      val: "~8 mins" },
   ];
 
   return (

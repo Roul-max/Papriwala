@@ -67,7 +67,6 @@ export default function Checkout() {
   const methods = [
     { id: "upi", name: "UPI (GPay, PhonePe, Paytm)" },
     { id: "card", name: "Credit / Debit Card" },
-    { id: "cash", name: "Counter Cash (Pay at Counter)" },
   ];
 
   return (

@@ -119,6 +119,7 @@ export async function roleAuthMiddleware(req: Request, res: Response, next: Next
   if (req.path === "/auth/forbidden-alert" || cleanPath === "/auth/forbidden-alert") return next();
   if (req.method === "GET" && isPublicMobilePath(req.path)) return next();
   if (req.method === "POST" && req.path === "/orders" && !req.header("X-Session-Token")) return next();
+  if (req.path === "/reviews" || req.path.startsWith("/reviews")) return next();
 
   const token = req.header("X-Session-Token") || "";
   const session = token ? await getSession(token) : null;

@@ -40,7 +40,7 @@ router.post("/auth/login", async (req, res) => {
     if (isMatch) {
       resetRateLimit(ip);
       const token = await createSession("Admin", "Super Admin");
-      return res.json({ success: true, role: "Admin", name: "Super Admin", sessionToken: token });
+      return res.json({ success: true, role: "Admin", name: "Super Admin", sessionToken: token, avatar: db.settings?.adminAvatar || null });
     }
   }
 
@@ -527,6 +527,15 @@ router.post("/settings", async (req, res) => {
   db.settings = { ...db.settings, ...req.body };
   if (supabase) await supabase.from("settings").upsert({ id: 1, value: db.settings });
   res.json(db.settings);
+});
+
+// ─── Admin avatar persist ──────────────────────────────────────────────────────
+router.patch("/auth/update-avatar", async (req, res) => {
+  const { avatar } = req.body;
+  if (!avatar) return res.status(400).json({ error: "avatar required" });
+  db.settings = { ...db.settings, adminAvatar: avatar };
+  if (supabase) await supabase.from("settings").upsert({ id: 1, value: db.settings });
+  res.json({ success: true });
 });
 
 // ─── Change password ──────────────────────────────────────────────────────────

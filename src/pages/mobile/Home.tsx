@@ -19,6 +19,8 @@ export default function Home() {
   const [searchResults, setSearchResults] = useState<{ type: "product" | "category"; id: string; name: string; sub: string; image: string; to: string }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const touchStartX = useRef(0);
+
   // Auto-advance slideshow every 3.5s
   useEffect(() => {
     const t = setInterval(() => setSlideIndex(i => (i + 1) % SLIDES.length), 3500);
@@ -132,7 +134,13 @@ export default function Home() {
 
       {/* Hero Slideshow */}
       <div className="w-full relative shrink-0 px-4">
-        <div className="h-52 w-full relative rounded-3xl overflow-hidden shadow-md">
+        <div className="h-52 w-full relative rounded-3xl overflow-hidden shadow-md"
+          onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
+          onTouchEnd={e => {
+            const diff = touchStartX.current - e.changedTouches[0].clientX;
+            if (Math.abs(diff) > 40) setSlideIndex(i => diff > 0 ? (i + 1) % SLIDES.length : (i - 1 + SLIDES.length) % SLIDES.length);
+          }}
+        >
           {SLIDES.map((slide, i) => (
             <div
               key={i}
@@ -166,13 +174,13 @@ export default function Home() {
           <h3 className="font-serif text-maroon font-bold text-lg">Categories</h3>
         </div>
         <div className="relative group">
-          <button 
-            onClick={() => scroll('left')} 
+          <button
+            onClick={() => scroll('left')}
             className="absolute left-0 top-1/2 -translate-y-[90%] -translate-x-3 z-10 p-1.5 rounded-full bg-white/95 backdrop-blur border border-gray-200 text-maroon shadow-md focus:outline-none"
           >
             <ChevronLeft size={16} />
           </button>
-          
+
           <div ref={scrollRef} className="flex space-x-4 overflow-x-auto pb-2 scrollbar-hide snap-x relative z-0">
             {categories.map(cat => (
               <Link key={cat.id} to={`/category/${cat.id}`} className="flex flex-col items-center space-y-2 shrink-0 w-20 snap-start">
@@ -183,8 +191,8 @@ export default function Home() {
               </Link>
             ))}
           </div>
-          <button 
-            onClick={() => scroll('right')} 
+          <button
+            onClick={() => scroll('right')}
             className="absolute right-0 top-1/2 -translate-y-[90%] translate-x-3 z-10 p-1.5 rounded-full bg-white/95 backdrop-blur border border-gray-200 text-maroon shadow-md focus:outline-none"
           >
             <ChevronRight size={16} />
@@ -198,7 +206,7 @@ export default function Home() {
           <h3 className="font-serif text-maroon font-bold text-lg">Best Sellers</h3>
           <Link to="/categories" className="text-xs font-bold text-gold hover:text-gold-light">VIEW ALL</Link>
         </div>
-        
+
         <div className="grid grid-cols-3 gap-3">
           {bestsellers.map(product => (
             <Link key={product.id} to={`/product/${product.id}`} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 flex flex-col">

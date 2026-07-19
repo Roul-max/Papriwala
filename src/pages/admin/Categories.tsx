@@ -1,45 +1,46 @@
 import { useState, useEffect } from "react";
-import { Plus, Edit2, Trash2, Image as ImageIcon, X, CheckCircle2, EyeOff } from "lucide-react";
+import { Plus, Edit2, Trash2, Image as ImageIcon, X, CheckCircle2, EyeOff, Package, ChevronDown, ChevronUp } from "lucide-react";
 import { apiFetch } from "../../lib/apiFetch";
 import { useAccess } from "../../hooks/useAccess";
 
-const EMPTY = { name: "", image: "" };
+const EMPTY_CAT = { name: "", image: "" };
+const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs", image: "" };
 
 export default function AdminCategories() {
   const [categories, setCategories] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [modal, setModal] = useState<{ open: boolean; editing: any | null }>({ open: false, editing: null });
-  const [form, setForm] = useState(EMPTY);
+  const [form, setForm] = useState(EMPTY_CAT);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
+  const [expandedCat, setExpandedCat] = useState<string | null>(null);
+  const [productModal, setProductModal] = useState<{ open: boolean; category: string } | null>(null);
+  const [productForm, setProductForm] = useState({ ...EMPTY_PRODUCT });
+  const [productError, setProductError] = useState("");
 
   const access = useAccess("Inventory");
   const isReadOnly = access === "Read-Only";
 
-  const load = () => apiFetch("/api/categories").then(r => r.json()).then(d => setCategories(Array.isArray(d) ? d : []));
+  const load = () => {
+    apiFetch("/api/categories").then(r => r.json()).then(d => setCategories(Array.isArray(d) ? d : []));
+    apiFetch("/api/products").then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : []));
+  };
   useEffect(() => { load(); }, []);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
 
-  const openAdd = () => { setForm(EMPTY); setModal({ open: true, editing: null }); };
+  const openAdd = () => { setForm(EMPTY_CAT); setModal({ open: true, editing: null }); };
   const openEdit = (cat: any) => { setForm({ name: cat.name, image: cat.image || "" }); setModal({ open: true, editing: cat }); };
 
   const handleSave = async () => {
     if (!form.name.trim()) return;
     setSaving(true);
     if (modal.editing) {
-      await apiFetch(`/api/categories/${modal.editing.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
+      await apiFetch(`/api/categories/${modal.editing.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
       showToast("Category updated.");
     } else {
-      await apiFetch("/api/categories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
+      await apiFetch("/api/categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
       showToast("Category added.");
     }
     setSaving(false);
@@ -52,6 +53,27 @@ export default function AdminCategories() {
     setDeleteId(null);
     showToast("Category deleted.");
     load();
+  };
+
+  const handleAddProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProductError("");
+    if (!productForm.name || !productForm.sku || !productForm.price) { setProductError("Name, SKU and price are required."); return; }
+    await apiFetch("/api/products", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...productForm, unit_purchase_cost: Number(productForm.unit_purchase_cost), price: Number(productForm.price), current_stock_qty: Number(productForm.current_stock_qty), safety_low_threshold: Number(productForm.safety_low_threshold) }),
+    });
+    setProductModal(null);
+    setProductForm({ ...EMPTY_PRODUCT });
+    showToast("Product added.");
+    load();
+  };
+
+  const openProductModal = (catName: string) => {
+    setProductForm({ ...EMPTY_PRODUCT, category: catName });
+    setProductError("");
+    setProductModal({ open: true, category: catName });
   };
 
   return (
@@ -75,30 +97,79 @@ export default function AdminCategories() {
         )}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-        {categories.map(cat => (
-          <div key={cat.id} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden group">
-            <div className="aspect-square relative overflow-hidden bg-gray-100">
-              {cat.image ? (
-                <img src={cat.image} alt={cat.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageIcon size={48} /></div>
-              )}
-              {!isReadOnly && (
-                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => openEdit(cat)} className="bg-white p-1.5 rounded shadow text-blue-600 hover:bg-blue-50"><Edit2 size={14} /></button>
-                  <button onClick={() => setDeleteId(cat.id)} className="bg-white p-1.5 rounded shadow text-red-600 hover:bg-red-50"><Trash2 size={14} /></button>
+      <div className="space-y-4">
+        {categories.map(cat => {
+          const catProducts = products.filter(p => p.category === cat.name);
+          const isExpanded = expandedCat === cat.id;
+          return (
+            <div key={cat.id} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+              {/* Category Header Row */}
+              <div className="flex items-center gap-4 p-4">
+                <div className="w-14 h-14 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                  {cat.image
+                    ? <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" />
+                    : <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageIcon size={24} /></div>
+                  }
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-gray-800 text-base">{cat.name}</h4>
+                  <p className="text-xs text-gray-500">{catProducts.length} product{catProducts.length !== 1 ? "s" : ""}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {!isReadOnly && (
+                    <>
+                      <button onClick={() => openProductModal(cat.name)} className="flex items-center gap-1 bg-maroon text-white text-xs font-semibold px-3 py-1.5 rounded hover:bg-maroon-light transition-colors">
+                        <Plus size={13} /> Add Product
+                      </button>
+                      <button onClick={() => openEdit(cat)} className="p-1.5 rounded text-blue-600 hover:bg-blue-50"><Edit2 size={15} /></button>
+                      <button onClick={() => setDeleteId(cat.id)} className="p-1.5 rounded text-red-600 hover:bg-red-50"><Trash2 size={15} /></button>
+                    </>
+                  )}
+                  <button onClick={() => setExpandedCat(isExpanded ? null : cat.id)} className="p-1.5 rounded text-gray-400 hover:text-maroon hover:bg-gray-50">
+                    {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Products under this category */}
+              {isExpanded && (
+                <div className="border-t border-gray-100 px-4 pb-4 pt-3">
+                  {catProducts.length === 0 ? (
+                    <div className="text-center py-6 text-gray-400 text-sm border-2 border-dashed border-gray-100 rounded-lg">
+                      No products in this category.
+                      {!isReadOnly && (
+                        <button onClick={() => openProductModal(cat.name)} className="block mx-auto mt-2 text-maroon font-semibold text-xs hover:underline">
+                          + Add first product
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                      {catProducts.map(p => (
+                        <div key={p.id} className="bg-gray-50 rounded-lg border border-gray-100 overflow-hidden">
+                          <div className="h-20 bg-amber-50">
+                            {p.image
+                              ? <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                              : <div className="w-full h-full flex items-center justify-center text-gray-300"><Package size={24} /></div>
+                            }
+                          </div>
+                          <div className="p-2">
+                            <p className="font-semibold text-gray-800 text-xs truncate">{p.name}</p>
+                            <p className="text-maroon font-bold text-xs">₹{p.price}</p>
+                            <p className="text-gray-400 text-[10px]">Stock: {p.current_stock_qty}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-            <div className="p-3 text-center border-t border-gray-100">
-              <h4 className="font-bold text-gray-800">{cat.name}</h4>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Add/Edit Modal */}
+      {/* Add/Edit Category Modal */}
       {modal.open && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
@@ -109,24 +180,14 @@ export default function AdminCategories() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Category Name *</label>
-                <input
-                  value={form.name}
-                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg p-2.5 focus:outline-none focus:border-maroon focus:ring-1 focus:ring-maroon"
-                  placeholder="e.g. Sweets"
-                />
+                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg p-2.5 focus:outline-none focus:border-maroon focus:ring-1 focus:ring-maroon" placeholder="e.g. Sweets" />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Image URL</label>
-                <input
-                  value={form.image}
-                  onChange={e => setForm(f => ({ ...f, image: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg p-2.5 focus:outline-none focus:border-maroon focus:ring-1 focus:ring-maroon"
-                  placeholder="https://..."
-                />
-                {form.image && (
-                  <img src={form.image} alt="preview" className="mt-2 h-24 w-full object-cover rounded-lg border border-gray-200" onError={e => (e.currentTarget.style.display = "none")} />
-                )}
+                <input value={form.image} onChange={e => setForm(f => ({ ...f, image: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg p-2.5 focus:outline-none focus:border-maroon focus:ring-1 focus:ring-maroon" placeholder="https://..." />
+                {form.image && <img src={form.image} alt="preview" className="mt-2 h-24 w-full object-cover rounded-lg border border-gray-200" onError={e => (e.currentTarget.style.display = "none")} />}
               </div>
             </div>
             <div className="flex gap-3 mt-6">
@@ -135,6 +196,51 @@ export default function AdminCategories() {
                 {saving ? "Saving..." : modal.editing ? "Update" : "Add Category"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Product Modal */}
+      {productModal?.open && (
+        <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl shrink-0">
+              <h3 className="font-bold text-maroon text-lg">Add Product — {productModal.category}</h3>
+              <button onClick={() => setProductModal(null)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+            </div>
+            <form onSubmit={handleAddProduct} className="p-5 space-y-3 overflow-y-auto flex-1">
+              {[
+                { label: "Product Name", key: "name", type: "text" },
+                { label: "SKU Code", key: "sku", type: "text" },
+                { label: "Unit (e.g. kg, pcs, ltr)", key: "unit", type: "text" },
+                { label: "Purchase Cost (₹)", key: "unit_purchase_cost", type: "number" },
+                { label: "Selling Price (₹)", key: "price", type: "number" },
+                { label: "Initial Quantity", key: "current_stock_qty", type: "number" },
+                { label: "Safety Low Threshold", key: "safety_low_threshold", type: "number" },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">{f.label}</label>
+                  <input type={f.type} value={(productForm as any)[f.key]}
+                    onChange={e => setProductForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+                </div>
+              ))}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Product Image URL</label>
+                <input type="text" value={productForm.image}
+                  onChange={e => setProductForm(prev => ({ ...prev, image: e.target.value }))}
+                  placeholder="https://..."
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+                {productForm.image && (
+                  <img src={productForm.image} alt="preview" className="mt-2 h-24 w-full object-cover rounded-lg border border-gray-200"
+                    onError={e => (e.currentTarget.style.display = "none")} />
+                )}
+              </div>
+              {productError && <p className="text-red-500 text-sm">{productError}</p>}
+              <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">
+                Add Product
+              </button>
+            </form>
           </div>
         </div>
       )}

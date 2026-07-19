@@ -40,9 +40,13 @@ export default function AdminProfile() {
       setAvatar(base64);
       localStorage.setItem("adminAvatar", base64);
       window.dispatchEvent(new Event("avatarChanged"));
-      // Persist to server for employees
-      if (!isAdmin && employeeId) {
-        await apiFetch(`/api/employees/${employeeId}`, {
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+      // Persist to server for all roles
+      const id = isAdmin ? "admin" : employeeId;
+      const endpoint = isAdmin ? "/api/auth/update-avatar" : `/api/employees/${employeeId}`;
+      if (id) {
+        await apiFetch(endpoint, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ avatar: base64 }),
@@ -121,6 +125,11 @@ export default function AdminProfile() {
               </div>
               <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
             </div>
+            {saveSuccess && (
+              <div className="flex items-center gap-1 text-green-600 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5 text-xs font-semibold mb-2">
+                <CheckCircle2 size={13} /> Photo saved!
+              </div>
+            )}
 
             {/* Name with inline edit */}
             {editingName ? (

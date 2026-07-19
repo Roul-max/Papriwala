@@ -34,7 +34,13 @@ export default function SplashLogin() {
 
   return (
     <div className="mobile-portal flex flex-col h-screen w-full max-w-md mx-auto bg-maroon relative shadow-2xl sm:border-x sm:border-gray-200" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-      <div className="absolute inset-0 opacity-10 bg-[url('/cover.png')] bg-cover bg-center"></div>
+      <div className="absolute inset-0" style={{
+        backgroundImage: `url('/cover%20pattern.png')`,
+        backgroundRepeat: "repeat",
+        backgroundSize: "250px",
+        backgroundBlendMode: "soft-light",
+        opacity: 4.0,
+      }}></div>
 
       {/* Hero */}
       <div className="flex-1 flex flex-col items-center justify-center relative z-10 p-6">

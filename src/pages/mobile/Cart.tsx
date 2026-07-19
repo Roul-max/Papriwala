@@ -46,14 +46,6 @@ export default function Cart() {
                 </div>
               </div>
             </div>
-            {/* §3.4 Per-item prep note */}
-            <input
-              type="text"
-              placeholder='Prep note (e.g. "No onions", "Extra sweet")'
-              value={item.note || ""}
-              onChange={e => updateNote(item.id, e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-600 focus:outline-none focus:border-maroon bg-gray-50"
-            />
           </div>
         ))}
       </div>

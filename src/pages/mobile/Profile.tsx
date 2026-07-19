@@ -49,8 +49,10 @@ export default function Profile() {
 
   const handleNameSave = () => {
     if (tempName.trim()) {
-      setName(tempName.trim());
-      localStorage.setItem("customerName", tempName.trim());
+      const trimmed = tempName.trim();
+      setName(trimmed);
+      localStorage.setItem("customerName", trimmed);
+      localStorage.setItem("adminName", trimmed);
       window.dispatchEvent(new Event("customerProfileUpdated"));
     }
     setIsEditingName(false);

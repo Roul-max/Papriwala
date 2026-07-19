@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { User, Lock, AlertCircle } from "lucide-react";
+import { User, Lock, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 export default function AdminLogin() {
@@ -12,6 +12,7 @@ export default function AdminLogin() {
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   const [setupMsg, setSetupMsg] = useState("");
+  const [showPass, setShowPass] = useState(false);
   const navigate = useNavigate();
 
   const handleSetPassword = async (e: React.FormEvent) => {
@@ -101,7 +102,14 @@ export default function AdminLogin() {
       )}
 
       {/* Left Panel */}
-      <div className="hidden lg:flex w-1/2 flex-col relative overflow-hidden bg-maroon">
+      <div className="hidden lg:flex w-1/2 flex-col relative overflow-hidden bg-maroon"
+        style={{
+          backgroundImage: `url('/cover%20pattern.png')`,
+          backgroundRepeat: "repeat",
+          backgroundSize: "800px",
+          backgroundBlendMode: "overlay",
+        }}
+      >
         {/* Top: logo + tagline + heading — centered */}
         <div className="relative z-10 flex flex-col items-center text-center pt-6 px-10">
           <img src="/Logo.png" alt="Papriwale Logo" className="w-28 h-28 object-contain mb-3" />
@@ -116,13 +124,12 @@ export default function AdminLogin() {
           </h1>
         </div>
         {/* Bottom: food cover image */}
-        <div className="flex-1 flex items-end overflow-hidden">
-          <img
-            src="/cover.png"
-            alt="Cover"
-            className="w-full object-contain object-bottom"
-          />
-        </div>
+        <img
+          src="/cover.png"
+          alt="Cover"
+          className="absolute left-0 right-0 bottom-0 w-full z-0"
+          style={{ objectFit: "fill", maxHeight: "110%" }}
+        />
       </div>
 
       {/* Right Panel */}
@@ -162,17 +169,21 @@ export default function AdminLogin() {
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
               <input
-                type="password"
-                placeholder="Password"
+                type={showPass ? "text" : "password"}
+                placeholder={role === "Employee" ? "Phone number" : "Password"}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:border-maroon focus:ring-1 focus:ring-maroon"
+                className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-md focus:outline-none focus:border-maroon focus:ring-1 focus:ring-maroon"
                 required
               />
+              <button type="button" onClick={() => setShowPass(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-maroon">
+                {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
             </div>
 
             {error && (
-              <div className="flex items-center gap-2 text-red-600 bg-red-50 p-3 rounded-lg text-sm font-semibold">
+              <div className={`flex items-center gap-2 p-3 rounded-lg text-sm font-semibold ${error.includes("set!") ? "text-green-700 bg-green-50" : "text-red-600 bg-red-50"}`}>
                 <AlertCircle size={16} /> {error}
               </div>
             )}
@@ -188,7 +199,7 @@ export default function AdminLogin() {
 
           <div className="lg:hidden text-center mt-6">
             <button onClick={() => navigate("/login")} className="text-maroon text-sm font-semibold hover:underline">
-              Customer Portal →
+              Login with OTP instead →
             </button>
           </div>
         </div>

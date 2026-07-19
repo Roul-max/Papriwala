@@ -547,7 +547,7 @@ export default function POS() {
                         </div>
                         <span className="font-medium text-gray-800">{v.size_label}</span>
                       </div>
-                      <span className="text-sm font-bold text-gray-600">[Rs. {price.toFixed(2)} Base]</span>
+                      <span className="text-sm font-bold text-gray-600">₹{price.toFixed(2)}</span>
                     </label>
                   );
                 })}

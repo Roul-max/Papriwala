@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { ChevronLeft, Star } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { apiFetch } from "../../lib/apiFetch";
 
 export default function Feedback() {
   const navigate = useNavigate();
@@ -10,7 +11,7 @@ export default function Feedback() {
   const [submitted, setSubmitted] = useState(false);
 
   const fetchReviews = () =>
-    fetch("/api/reviews").then(r => r.json()).then(d => setReviews(Array.isArray(d) ? d : []));
+    apiFetch("/api/reviews").then(r => r.json()).then(d => setReviews(Array.isArray(d) ? d : []));
 
   useEffect(() => { fetchReviews(); }, []);
 
@@ -18,7 +19,7 @@ export default function Feedback() {
     e.preventDefault();
     if (!form.author.trim() || !form.text.trim()) return;
     setSubmitting(true);
-    await fetch("/api/reviews", {
+    await apiFetch("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),

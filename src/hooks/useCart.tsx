@@ -174,7 +174,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
                       </div>
                       <span className="font-medium text-gray-800">{v.size_label}</span>
                     </div>
-                    <span className="text-sm font-bold text-gray-600">[Rs. {v.price.toFixed(2)} Base]</span>
+                    <span className="text-sm font-bold text-gray-600">₹{v.price.toFixed(2)}</span>
                   </label>
                 ))}
               </div>

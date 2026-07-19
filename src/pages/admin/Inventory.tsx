@@ -174,6 +174,7 @@ export default function Inventory() {
                 <th className="py-3 px-4">SKU</th>
                 <th className="py-3 px-4">Qty</th>
                 <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4">Alerts</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -186,12 +187,14 @@ export default function Inventory() {
                   <td className="py-3 px-4 font-mono text-xs">{p.sku}</td>
                   <td className="py-3 px-4 font-bold">{p.current_stock_qty}</td>
                   <td className="py-3 px-4">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${p.current_stock_qty === 0 ? "bg-red-100 text-red-700" : p.current_stock_qty <= p.safety_low_threshold ? "bg-yellow-100 text-yellow-700" : "bg-green-100 text-green-700"}`}>
-                        {p.current_stock_qty === 0 ? "Out of Stock" : p.current_stock_qty <= p.safety_low_threshold ? "Low Stock" : "In Stock"}
-                      </span>
-                      {p.muted && <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">🔕 Muted</span>}
-                    </div>
+                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${p.current_stock_qty === 0 ? "bg-red-100 text-red-700" : p.current_stock_qty <= p.safety_low_threshold ? "bg-yellow-100 text-yellow-700" : "bg-green-100 text-green-700"}`}>
+                      {p.current_stock_qty === 0 ? "Out of Stock" : p.current_stock_qty <= p.safety_low_threshold ? "Low Stock" : "In Stock"}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4">
+                    {p.muted
+                      ? <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">🔕 Muted</span>
+                      : <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600">🔔 Active</span>}
                   </td>
                   <td className="py-3 px-4 text-right">
                     <div className="flex justify-end gap-1">
@@ -203,7 +206,7 @@ export default function Inventory() {
                             className="text-orange-500 hover:bg-orange-50 p-1.5 rounded" title="Stock Out"><ArrowUpCircle size={16} /></button>
                           <button onClick={() => handleToggleMute(p)}
                             className={`p-1.5 rounded text-xs font-bold ${p.muted ? "text-gray-400 hover:bg-gray-50" : "text-blue-500 hover:bg-blue-50"}`}
-                            title={p.muted ? "Unmute notifications" : "Mute notifications"}>{p.muted ? "🔔" : "🔕"}</button>
+                            title={p.muted ? "Unmute" : "Mute"}>{p.muted ? "🔔" : "🔕"}</button>
                           <button onClick={() => { setDeleteTarget(p); setDeleteConfirm(false); }}
                             className="text-red-600 hover:bg-red-50 p-1.5 rounded" title="Delete"><Trash2 size={16} /></button>
                         </>
@@ -267,13 +270,13 @@ export default function Inventory() {
 
       {/* Add Product Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl">
+        <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl max-h-[90vh] flex flex-col">
             <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl">
               <h3 className="font-bold text-maroon text-lg">Add New Product</h3>
               <button onClick={() => setShowAddModal(false)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
             </div>
-            <form onSubmit={handleAddProduct} className="p-5 space-y-3">
+            <form onSubmit={handleAddProduct} className="p-5 space-y-3 overflow-y-auto flex-1">
               {[
                 { label: "Product Name", key: "name", type: "text" },
                 { label: "SKU Code", key: "sku", type: "text" },
