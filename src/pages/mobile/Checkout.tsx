@@ -42,11 +42,6 @@ export default function Checkout() {
       })
     });
 
-    // §3.6 — Persist to device-local history
-    const history = JSON.parse(localStorage.getItem("orderHistory") || "[]");
-    history.unshift({ id: Date.now(), timestamp: new Date().toISOString(), items, total, tableId, method });
-    localStorage.setItem("orderHistory", JSON.stringify(history.slice(0, 20)));
-
     clearCart();
     setSuccess(true);
   };

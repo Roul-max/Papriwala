@@ -123,6 +123,7 @@ export default function Profile() {
       if (token) fetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token, "X-User-Role": "Customer" } }).catch(() => {});
       ["customerRole","customerName","customerToken","customerId","customerAvatar","employeePhone","isNewCustomer","orderHistory"].forEach(k => localStorage.removeItem(k));
       sessionStorage.clear();
+      window.dispatchEvent(new Event("customerProfileUpdated"));
       navigate("/login");
     } else if (isAdmin) {
       const token = localStorage.getItem("sessionToken") || "";
