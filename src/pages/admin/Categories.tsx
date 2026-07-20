@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Plus, Edit2, Trash2, Image as ImageIcon, X, CheckCircle2, EyeOff, Package, ChevronDown, ChevronUp } from "lucide-react";
 import { apiFetch } from "../../lib/apiFetch";
 import { useAccess } from "../../hooks/useAccess";
@@ -24,6 +24,21 @@ export default function AdminCategories() {
 
   const access = useAccess("Inventory");
   const isReadOnly = access === "Read-Only";
+
+  const resizeImage = (file: File, cb: (dataUrl: string) => void) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 300; canvas.height = 300;
+      const ctx = canvas.getContext("2d")!;
+      const size = Math.min(img.width, img.height);
+      ctx.drawImage(img, (img.width - size) / 2, (img.height - size) / 2, size, size, 0, 0, 300, 300);
+      URL.revokeObjectURL(url);
+      cb(canvas.toDataURL("image/jpeg", 0.75));
+    };
+    img.src = url;
+  };
 
   const load = () => {
     apiFetch("/api/categories").then(r => r.json()).then(d => setCategories(Array.isArray(d) ? d : []));
@@ -213,10 +228,24 @@ export default function AdminCategories() {
                   className="w-full border border-gray-300 rounded-lg p-2.5 focus:outline-none focus:border-maroon focus:ring-1 focus:ring-maroon" placeholder="e.g. Sweets" />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Image URL</label>
-                <input value={form.image} onChange={e => setForm(f => ({ ...f, image: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg p-2.5 focus:outline-none focus:border-maroon focus:ring-1 focus:ring-maroon" placeholder="https://..." />
-                {form.image && <img src={form.image} alt="preview" className="mt-2 h-24 w-full object-cover rounded-lg border border-gray-200" onError={e => (e.currentTarget.style.display = "none")} />}
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Category Image (optional)</label>
+                <div className="flex items-center gap-3 mt-1">
+                  {form.image
+                    ? <img src={form.image} alt="preview" className="w-16 h-16 rounded-lg object-cover border border-gray-200 shrink-0" />
+                    : <div className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-300 shrink-0"><ImageIcon size={22} /></div>
+                  }
+                  <div className="flex flex-col gap-1.5 flex-1">
+                    <label className="cursor-pointer bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-2 rounded text-center transition-colors">
+                      Upload Image
+                      <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) resizeImage(f, url => setForm(prev => ({ ...prev, image: url }))); }} />
+                    </label>
+                    <input type="text" placeholder="Or paste image URL"
+                      value={form.image.startsWith("data:") ? "" : form.image}
+                      onChange={e => setForm(prev => ({ ...prev, image: e.target.value }))}
+                      className="w-full border border-gray-300 rounded px-3 py-1.5 text-xs focus:outline-none focus:border-maroon" />
+                  </div>
+                  {form.image && <button type="button" onClick={() => setForm(prev => ({ ...prev, image: "" }))} className="text-gray-400 hover:text-red-500 shrink-0"><X size={16} /></button>}
+                </div>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
@@ -255,15 +284,24 @@ export default function AdminCategories() {
                 </div>
               ))}
               <div>
-                <label className="text-xs font-semibold text-gray-600 uppercase">Product Image URL</label>
-                <input type="text" value={productForm.image}
-                  onChange={e => setProductForm(prev => ({ ...prev, image: e.target.value }))}
-                  placeholder="https://..."
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
-                {productForm.image && (
-                  <img src={productForm.image} alt="preview" className="mt-2 h-24 w-full object-cover rounded-lg border border-gray-200"
-                    onError={e => (e.currentTarget.style.display = "none")} />
-                )}
+                <label className="text-xs font-semibold text-gray-600 uppercase">Product Image (optional)</label>
+                <div className="mt-1 flex items-center gap-3">
+                  {productForm.image
+                    ? <img src={productForm.image} alt="preview" className="w-16 h-16 rounded-lg object-cover border border-gray-200 shrink-0" />
+                    : <div className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-300 shrink-0"><Package size={22} /></div>
+                  }
+                  <div className="flex flex-col gap-1.5 flex-1">
+                    <label className="cursor-pointer bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-2 rounded text-center transition-colors">
+                      Upload Image
+                      <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) resizeImage(f, url => setProductForm(prev => ({ ...prev, image: url }))); }} />
+                    </label>
+                    <input type="text" placeholder="Or paste image URL"
+                      value={productForm.image.startsWith("data:") ? "" : productForm.image}
+                      onChange={e => setProductForm(prev => ({ ...prev, image: e.target.value }))}
+                      className="w-full border border-gray-300 rounded px-3 py-1.5 text-xs focus:outline-none focus:border-maroon" />
+                  </div>
+                  {productForm.image && <button type="button" onClick={() => setProductForm(prev => ({ ...prev, image: "" }))} className="text-gray-400 hover:text-red-500 shrink-0"><X size={16} /></button>}
+                </div>
               </div>
               {productError && <p className="text-red-500 text-sm">{productError}</p>}
               <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">
@@ -300,15 +338,24 @@ export default function AdminCategories() {
                 </div>
               ))}
               <div>
-                <label className="text-xs font-semibold text-gray-600 uppercase">Product Image URL</label>
-                <input type="text" value={editProductForm.image}
-                  onChange={e => setEditProductForm(prev => ({ ...prev, image: e.target.value }))}
-                  placeholder="https://..."
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
-                {editProductForm.image && (
-                  <img src={editProductForm.image} alt="preview" className="mt-2 h-24 w-full object-cover rounded-lg border border-gray-200"
-                    onError={e => (e.currentTarget.style.display = "none")} />
-                )}
+                <label className="text-xs font-semibold text-gray-600 uppercase">Product Image (optional)</label>
+                <div className="mt-1 flex items-center gap-3">
+                  {editProductForm.image
+                    ? <img src={editProductForm.image} alt="preview" className="w-16 h-16 rounded-lg object-cover border border-gray-200 shrink-0" />
+                    : <div className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-300 shrink-0"><Package size={22} /></div>
+                  }
+                  <div className="flex flex-col gap-1.5 flex-1">
+                    <label className="cursor-pointer bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-2 rounded text-center transition-colors">
+                      Upload Image
+                      <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) resizeImage(f, url => setEditProductForm(prev => ({ ...prev, image: url }))); }} />
+                    </label>
+                    <input type="text" placeholder="Or paste image URL"
+                      value={editProductForm.image.startsWith("data:") ? "" : editProductForm.image}
+                      onChange={e => setEditProductForm(prev => ({ ...prev, image: e.target.value }))}
+                      className="w-full border border-gray-300 rounded px-3 py-1.5 text-xs focus:outline-none focus:border-maroon" />
+                  </div>
+                  {editProductForm.image && <button type="button" onClick={() => setEditProductForm(prev => ({ ...prev, image: "" }))} className="text-gray-400 hover:text-red-500 shrink-0"><X size={16} /></button>}
+                </div>
               </div>
               {editProductError && <p className="text-red-500 text-sm">{editProductError}</p>}
               <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">

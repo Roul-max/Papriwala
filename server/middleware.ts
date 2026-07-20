@@ -41,7 +41,7 @@ export async function destroySession(token: string): Promise<void> {
   }
 }
 
-async function getSession(token: string): Promise<Session | null> {
+export async function getSession(token: string): Promise<Session | null> {
   // Try in-memory first (fast path)
   const mem = sessionStore.get(token);
   if (mem) {
@@ -85,6 +85,7 @@ const PUBLIC_PATHS = new Set([
   "/auth/verify-otp",
   "/auth/guest-login",
   "/auth/guest-profile",
+  "/auth/me",
 ]);
 
 // Paths that are fully public (mobile menu portal — no admin session required)
@@ -135,6 +136,14 @@ export async function roleAuthMiddleware(req: Request, res: Response, next: Next
   const { role } = session;
 
   if (role === "Admin" || role === "Customer") return next();
+
+  // Allow employees to update their own profile (avatar/name) regardless of module permissions
+  if (
+    req.method === "PATCH" &&
+    req.path === `/employees/${session.employeeId}`
+  ) return next();
+
+
 
   const permissions: Record<string, Record<string, string>> = (db.settings as any)?.permissions?.[role] || {};
   const pathModule = deriveModule(req.path, req.method);

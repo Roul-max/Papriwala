@@ -56,14 +56,13 @@ export default function Profile() {
     }
   };
 
-  const handleDeleteAvatar = () => {
+  const handleDeleteAvatar = async () => {
     setAvatar(null);
     if (isCustomer) {
       localStorage.removeItem("customerAvatar");
-      persistCustomerProfile(undefined, null);
+      await persistCustomerProfile(undefined, null);
       window.dispatchEvent(new Event("customerProfileUpdated"));
     } else if (isAdmin) {
-      localStorage.removeItem("adminAvatar");
       window.dispatchEvent(new Event("avatarChanged"));
     }
   };
@@ -73,12 +72,11 @@ export default function Profile() {
     if (!file) return;
     const img = new Image();
     const url = URL.createObjectURL(file);
-    img.onload = () => {
+    img.onload = async () => {
       const canvas = document.createElement("canvas");
       const SIZE = 200;
       canvas.width = SIZE; canvas.height = SIZE;
       const ctx = canvas.getContext("2d")!;
-      // crop to square from center
       const min = Math.min(img.width, img.height);
       const sx = (img.width - min) / 2;
       const sy = (img.height - min) / 2;
@@ -88,10 +86,15 @@ export default function Profile() {
       setAvatar(b64);
       if (isCustomer) {
         localStorage.setItem("customerAvatar", b64);
-        persistCustomerProfile(undefined, b64);
+        await persistCustomerProfile(undefined, b64);
         window.dispatchEvent(new Event("customerProfileUpdated"));
       } else if (isAdmin) {
-        localStorage.setItem("adminAvatar", b64);
+        // Save to server only — no localStorage (avoids QuotaExceededError)
+        await fetch("/api/auth/update-avatar", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", "X-Session-Token": localStorage.getItem("sessionToken") || "", "X-User-Role": localStorage.getItem("adminRole") || "" },
+          body: JSON.stringify({ avatar: b64 }),
+        });
         window.dispatchEvent(new Event("avatarChanged"));
       }
     };

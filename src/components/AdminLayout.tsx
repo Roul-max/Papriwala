@@ -62,13 +62,35 @@ export default function AdminLayout() {
   const [unreadCount,   setUnreadCount]   = useState(0);
   const [badgeFlash,    setBadgeFlash]    = useState(false);
 
-  const [avatar,             setAvatar]             = useState<string | null>(localStorage.getItem("adminAvatar"));
+  const [avatar,             setAvatar]             = useState<string | null>(null);
   const [inventoryDepleted,  setInventoryDepleted]  = useState(false);
   const [dealerInvoiceModal, setDealerInvoiceModal] = useState<DealerInvoiceModal | null>(null);
 
   const notifRef  = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
   const audioRef  = useRef<HTMLAudioElement | null>(null);
+
+  // ── Load avatar from server (never from localStorage) ──────────────────
+  const fetchAvatar = () => {
+    const r = localStorage.getItem("adminRole") || "";
+    const empId = localStorage.getItem("employeeId") || "";
+    if (r === "Admin") {
+      apiFetch("/api/settings").then(res => res.json()).then((s: any) => {
+        setAvatar(s.adminAvatar || null);
+        if (s.adminName) localStorage.setItem("adminName", s.adminName);
+      }).catch(() => {});
+    } else if (empId) {
+      apiFetch("/api/auth/me").then(res => res.json()).then((me: any) => {
+        setAvatar(me.avatar || null);
+        if (me.avatar) localStorage.setItem("adminAvatar", me.avatar);
+        else localStorage.removeItem("adminAvatar");
+      }).catch(() => {
+        setAvatar(localStorage.getItem("adminAvatar") || null);
+      });
+    }
+  };
+
+  useEffect(() => { fetchAvatar(); }, []);
 
   // ── Load notifications on mount ──────────────────────────────────────────
   useEffect(() => {
@@ -88,7 +110,7 @@ export default function AdminLayout() {
     const onResize       = () => setIsMobile(window.innerWidth < 768);
     const onOffline      = () => setIsOffline(true);
     const onOnline       = () => setIsOffline(false);
-    const onAvatarChange = () => setAvatar(localStorage.getItem("adminAvatar"));
+    const onAvatarChange = () => fetchAvatar();
 
     window.addEventListener("resize",        onResize);
     window.addEventListener("offline",       onOffline);
@@ -143,6 +165,12 @@ export default function AdminLayout() {
           }
           if (type === "DEALER_INVOICE_DUE") {
             setDealerInvoiceModal({ dealer_id: payload.dealer_id, dealer_name: payload.dealer_name, amount_due: payload.amount_due, expiry_date: payload.expiry_date });
+          }
+          if (type === "PAYMENT_DUE_SOON") {
+            addNotif(`⏰ Payment Due Soon: ${payload.material_name}`, `₹${payload.amount} due on ${payload.due_date} — Dealer: ${payload.dealer_name}`, "warning");
+          }
+          if (type === "PAYMENT_OVERDUE") {
+            addNotif(`🚨 Payment Overdue: ${payload.material_name}`, `₹${payload.amount} was due on ${payload.due_date} — Dealer: ${payload.dealer_name}`, "error");
           }
         } catch {}
       };

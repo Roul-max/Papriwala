@@ -3,10 +3,10 @@ import { Package, AlertTriangle, XCircle, Search, Plus, X, Trash2, ArrowDownCirc
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
 
-type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; muted?: boolean; };
+type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; muted?: boolean; image?: string; };
 type LogEntry = { id: string; type: "STOCK_IN" | "STOCK_OUT"; product_name: string; qty: number; reason: string; operator: string; timestamp: string; };
 
-const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs" };
+const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs", image: "" };
 
 export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -54,6 +54,24 @@ export default function Inventory() {
     { label: "Low Stock Items", value: products.filter(p => p.current_stock_qty > 0 && p.current_stock_qty <= p.safety_low_threshold).length, icon: AlertTriangle, color: "text-yellow-500" },
     { label: "Out of Stock", value: products.filter(p => p.current_stock_qty === 0).length, icon: XCircle, color: "text-red-500" },
   ];
+
+  const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 300; canvas.height = 300;
+      const ctx = canvas.getContext("2d")!;
+      const size = Math.min(img.width, img.height);
+      const sx = (img.width - size) / 2, sy = (img.height - size) / 2;
+      ctx.drawImage(img, sx, sy, size, size, 0, 0, 300, 300);
+      URL.revokeObjectURL(url);
+      setAddForm(prev => ({ ...prev, image: canvas.toDataURL("image/jpeg", 0.75) }));
+    };
+    img.src = url;
+  };
 
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -182,7 +200,15 @@ export default function Inventory() {
               {filtered.map((p, i) => (
                 <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="py-3 px-4 text-gray-500">{i + 1}</td>
-                  <td className="py-3 px-4 font-medium text-gray-800">{p.name}</td>
+                  <td className="py-3 px-4 font-medium text-gray-800">
+                    <div className="flex items-center gap-2">
+                      {p.image
+                        ? <img src={p.image} alt={p.name} className="w-8 h-8 rounded object-cover border border-gray-200 flex-shrink-0" />
+                        : <div className="w-8 h-8 rounded bg-gray-100 flex items-center justify-center flex-shrink-0"><Package size={14} className="text-gray-400" /></div>
+                      }
+                      {p.name}
+                    </div>
+                  </td>
                   <td className="py-3 px-4 text-gray-500">{p.category}</td>
                   <td className="py-3 px-4 font-mono text-xs">{p.sku}</td>
                   <td className="py-3 px-4 font-bold">{p.current_stock_qty}</td>
@@ -277,6 +303,32 @@ export default function Inventory() {
               <button onClick={() => setShowAddModal(false)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
             </div>
             <form onSubmit={handleAddProduct} className="p-5 space-y-3 overflow-y-auto flex-1">
+              {/* Product Image */}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Product Image (optional)</label>
+                <div className="mt-1 flex items-center gap-3">
+                  {addForm.image
+                    ? <img src={addForm.image} alt="preview" className="w-16 h-16 rounded-lg object-cover border border-gray-200" />
+                    : <div className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-300"><Package size={24} /></div>
+                  }
+                  <div className="flex flex-col gap-1.5 flex-1">
+                    <label className="cursor-pointer bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-2 rounded text-center transition-colors">
+                      Upload Image
+                      <input type="file" accept="image/*" className="hidden" onChange={handleProductImageUpload} />
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Or paste image URL"
+                      value={addForm.image.startsWith("data:") ? "" : addForm.image}
+                      onChange={e => setAddForm(prev => ({ ...prev, image: e.target.value }))}
+                      className="w-full border border-gray-300 rounded px-3 py-1.5 text-xs focus:outline-none focus:border-maroon"
+                    />
+                  </div>
+                  {addForm.image && (
+                    <button type="button" onClick={() => setAddForm(prev => ({ ...prev, image: "" }))} className="text-gray-400 hover:text-red-500"><X size={16} /></button>
+                  )}
+                </div>
+              </div>
               {[
                 { label: "Product Name", key: "name", type: "text" },
                 { label: "SKU Code", key: "sku", type: "text" },

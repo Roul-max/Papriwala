@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, X, Trash2, EyeOff, CheckCircle2, AlertCircle } from "lucide-react";
+import { Plus, X, Trash2, EyeOff, CheckCircle2, AlertCircle, Clock, AlertTriangle, Filter } from "lucide-react";
 import { apiFetch } from "../../lib/apiFetch";
 import { useAccess } from "../../hooks/useAccess";
 
@@ -25,6 +25,7 @@ export default function DealerExpenses() {
   const [showRawModal, setShowRawModal] = useState(false);
   const [rawForm, setRawForm] = useState({ material_name: "", qty: "", unit: "kg", rate_per_unit: "", dealer_id: "", notes: "", is_paid: false, due_date: new Date(Date.now() + 7*24*60*60*1000).toISOString().split("T")[0] });
   const [rawError, setRawError] = useState("");
+  const [rawFilter, setRawFilter] = useState<"all" | "pending" | "overdue" | "paid">("all");
 
   const access = useAccess("Financial Reports");
   const isReadOnly = access === "Read-Only";
@@ -41,6 +42,24 @@ export default function DealerExpenses() {
   };
 
   useEffect(() => { fetchAll(); }, []);
+
+  // Fire due-alerts check on mount
+  useEffect(() => { apiFetch("/api/raw-material-purchases/due-alerts").catch(() => {}); }, []);
+
+  const today = new Date().toISOString().split("T")[0];
+  const twoDaysLater = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+  const pendingPurchases = rawPurchases.filter((r: any) => !r.is_paid);
+  const overduePurchases = rawPurchases.filter((r: any) => !r.is_paid && r.due_date && r.due_date < today);
+  const dueSoonPurchases = rawPurchases.filter((r: any) => !r.is_paid && r.due_date && r.due_date >= today && r.due_date <= twoDaysLater);
+  const totalPending = pendingPurchases.reduce((s: number, r: any) => s + r.qty * r.rate_per_unit, 0);
+
+  const filteredRaw = rawPurchases.filter((r: any) => {
+    if (rawFilter === "pending") return !r.is_paid;
+    if (rawFilter === "overdue") return !r.is_paid && r.due_date && r.due_date < today;
+    if (rawFilter === "paid")    return r.is_paid;
+    return true;
+  });
 
   const totalPOSInflows = orders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
   const totalStockValue = products.reduce((s, p) => s + (Number(p.unit_purchase_cost) * Number(p.current_stock_qty) || 0), 0);
@@ -116,63 +135,127 @@ export default function DealerExpenses() {
       </div>
 
       {tab === "rawmat" && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 flex flex-col">
-          <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-            <h3 className="font-bold text-gray-800">Raw Material Purchase Log</h3>
-            {!isReadOnly && (
-              <button onClick={() => { setShowRawModal(true); setRawError(""); }}
-                className="bg-maroon hover:bg-maroon-light text-white px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1">
-                <Plus size={14} /> Log Purchase
-              </button>
-            )}
+        <div className="space-y-4">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 border-l-4 border-l-red-500">
+              <p className="text-xs text-gray-500 font-semibold uppercase mb-1">Total Pending</p>
+              <p className="text-xl font-bold text-red-600">₹{totalPending.toFixed(0)}</p>
+              <p className="text-xs text-gray-400 mt-1">{pendingPurchases.length} unpaid purchase{pendingPurchases.length !== 1 ? "s" : ""}</p>
+            </div>
+            <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 border-l-4 border-l-orange-500">
+              <p className="text-xs text-gray-500 font-semibold uppercase mb-1">Overdue</p>
+              <p className="text-xl font-bold text-orange-600">{overduePurchases.length}</p>
+              <p className="text-xs text-gray-400 mt-1">Past due date, unpaid</p>
+            </div>
+            <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 border-l-4 border-l-yellow-500">
+              <p className="text-xs text-gray-500 font-semibold uppercase mb-1">Due Soon</p>
+              <p className="text-xl font-bold text-yellow-600">{dueSoonPurchases.length}</p>
+              <p className="text-xs text-gray-400 mt-1">Due within 2 days</p>
+            </div>
+            <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 border-l-4 border-l-green-500">
+              <p className="text-xs text-gray-500 font-semibold uppercase mb-1">Paid</p>
+              <p className="text-xl font-bold text-green-600">{rawPurchases.filter((r: any) => r.is_paid).length}</p>
+              <p className="text-xs text-gray-400 mt-1">Cleared purchases</p>
+            </div>
           </div>
-          <div className="overflow-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="py-3 px-4">Date</th>
-                  <th className="py-3 px-4">Material</th>
-                  <th className="py-3 px-4">Qty</th>
-                  <th className="py-3 px-4">Unit</th>
-                  <th className="py-3 px-4">Rate/Unit</th>
-                  <th className="py-3 px-4">Total</th>
-                  <th className="py-3 px-4">Dealer</th>
-                  <th className="py-3 px-4">Due Date</th>
-                  <th className="py-3 px-4">Payment</th>
-                  <th className="py-3 px-4">Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rawPurchases.map((r: any) => {
-                  const isOverdue = !r.is_paid && r.due_date && r.due_date < new Date().toISOString().split("T")[0];
-                  return (
-                  <tr key={r.id} className={`border-b border-gray-100 hover:bg-gray-50 ${isOverdue ? "bg-red-50" : ""}`}>
-                    <td className="py-3 px-4 text-gray-500 text-xs">{new Date(r.purchase_date).toLocaleDateString()}</td>
-                    <td className="py-3 px-4 font-bold text-gray-800">{r.material_name}</td>
-                    <td className="py-3 px-4">{r.qty}</td>
-                    <td className="py-3 px-4 text-gray-500">{r.unit}</td>
-                    <td className="py-3 px-4">₹{Number(r.rate_per_unit).toFixed(2)}</td>
-                    <td className="py-3 px-4 font-bold">₹{(r.qty * r.rate_per_unit).toFixed(2)}</td>
-                    <td className="py-3 px-4 text-gray-500 text-xs">{dealers.find(d => d.id === r.dealer_id)?.name || "—"}</td>
-                    <td className="py-3 px-4 text-xs">
-                      <span className={isOverdue ? "text-red-600 font-bold" : "text-gray-500"}>{r.due_date || "—"}</span>
-                    </td>
-                    <td className="py-3 px-4">
-                      {r.is_paid
-                        ? <span className="flex items-center gap-1 text-green-600 text-xs font-bold"><CheckCircle2 size={12} /> Paid</span>
-                        : <button onClick={async () => { await apiFetch(`/api/raw-material-purchases/${r.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_paid: true }) }); fetchAll(); }}
-                            className="text-xs bg-green-600 text-white px-2 py-1 rounded font-semibold hover:bg-green-700">
-                            Mark Paid
-                          </button>
-                      }
-                    </td>
-                    <td className="py-3 px-4 text-gray-400 text-xs">{r.notes || "—"}</td>
+
+          {/* Due Soon Banner */}
+          {dueSoonPurchases.length > 0 && (
+            <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 flex items-center gap-3">
+              <Clock size={18} className="text-yellow-600 shrink-0" />
+              <p className="text-yellow-800 text-sm font-semibold">
+                ⚠ {dueSoonPurchases.length} payment{dueSoonPurchases.length > 1 ? "s" : ""} due within 2 days —
+                {dueSoonPurchases.map((r: any) => ` ${r.material_name} (₹${(r.qty * r.rate_per_unit).toFixed(0)})`).join(",")}
+              </p>
+            </div>
+          )}
+          {overduePurchases.length > 0 && (
+            <div className="bg-red-50 border border-red-300 rounded-lg p-3 flex items-center gap-3">
+              <AlertTriangle size={18} className="text-red-600 shrink-0" />
+              <p className="text-red-800 text-sm font-semibold">
+                🚨 {overduePurchases.length} payment{overduePurchases.length > 1 ? "s" : ""} overdue —
+                {overduePurchases.map((r: any) => ` ${r.material_name} (₹${(r.qty * r.rate_per_unit).toFixed(0)})`).join(",")}
+              </p>
+            </div>
+          )}
+
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100 flex flex-col">
+            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-gray-800">Raw Material Purchase Log</h3>
+                <div className="flex gap-1 ml-2">
+                  {(["all", "pending", "overdue", "paid"] as const).map(f => (
+                    <button key={f} onClick={() => setRawFilter(f)}
+                      className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors capitalize ${
+                        rawFilter === f ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}>
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {!isReadOnly && (
+                <button onClick={() => { setShowRawModal(true); setRawError(""); }}
+                  className="bg-maroon hover:bg-maroon-light text-white px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1">
+                  <Plus size={14} /> Log Purchase
+                </button>
+              )}
+            </div>
+            <div className="overflow-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="py-3 px-4">Date</th>
+                    <th className="py-3 px-4">Material</th>
+                    <th className="py-3 px-4">Qty</th>
+                    <th className="py-3 px-4">Unit</th>
+                    <th className="py-3 px-4">Rate/Unit</th>
+                    <th className="py-3 px-4">Total</th>
+                    <th className="py-3 px-4">Dealer</th>
+                    <th className="py-3 px-4">Due Date</th>
+                    <th className="py-3 px-4">Payment</th>
+                    <th className="py-3 px-4">Notes</th>
                   </tr>
-                  );
-                })}
-                {rawPurchases.length === 0 && <tr><td colSpan={10} className="py-8 text-center text-gray-400 italic">No raw material purchases recorded.</td></tr>}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredRaw.map((r: any) => {
+                    const isOverdue  = !r.is_paid && r.due_date && r.due_date < today;
+                    const isDueSoon  = !r.is_paid && r.due_date && r.due_date >= today && r.due_date <= twoDaysLater;
+                    const rowBg = isOverdue ? "bg-red-50" : isDueSoon ? "bg-yellow-50" : "";
+                    return (
+                      <tr key={r.id} className={`border-b border-gray-100 hover:bg-gray-50 ${rowBg}`}>
+                        <td className="py-3 px-4 text-gray-500 text-xs">{new Date(r.purchase_date).toLocaleDateString()}</td>
+                        <td className="py-3 px-4 font-bold text-gray-800">{r.material_name}</td>
+                        <td className="py-3 px-4">{r.qty}</td>
+                        <td className="py-3 px-4 text-gray-500">{r.unit}</td>
+                        <td className="py-3 px-4">₹{Number(r.rate_per_unit).toFixed(2)}</td>
+                        <td className="py-3 px-4 font-bold">₹{(r.qty * r.rate_per_unit).toFixed(2)}</td>
+                        <td className="py-3 px-4 text-gray-500 text-xs">{dealers.find((d: any) => d.id === r.dealer_id)?.name || "—"}</td>
+                        <td className="py-3 px-4 text-xs">
+                          <span className={isOverdue ? "text-red-600 font-bold" : isDueSoon ? "text-yellow-600 font-bold" : "text-gray-500"}>
+                            {r.due_date || "—"}
+                            {isDueSoon && <span className="ml-1 text-[10px] bg-yellow-100 text-yellow-700 px-1 rounded">Soon</span>}
+                            {isOverdue && <span className="ml-1 text-[10px] bg-red-100 text-red-700 px-1 rounded">Overdue</span>}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          {r.is_paid
+                            ? <span className="flex items-center gap-1 text-green-600 text-xs font-bold"><CheckCircle2 size={12} /> Paid</span>
+                            : <button onClick={async () => { await apiFetch(`/api/raw-material-purchases/${r.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_paid: true }) }); fetchAll(); }}
+                                className="text-xs bg-green-600 text-white px-2 py-1 rounded font-semibold hover:bg-green-700">
+                                Mark Paid
+                              </button>
+                          }
+                        </td>
+                        <td className="py-3 px-4 text-gray-400 text-xs">{r.notes || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                  {filteredRaw.length === 0 && <tr><td colSpan={10} className="py-8 text-center text-gray-400 italic">No purchases found.</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

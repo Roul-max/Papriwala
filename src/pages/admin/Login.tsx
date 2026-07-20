@@ -54,8 +54,8 @@ export default function AdminLogin() {
       localStorage.setItem("adminName",    data.name);
       localStorage.setItem("sessionToken", data.sessionToken);
       if (data.employee_id) localStorage.setItem("employeeId", data.employee_id);
+      if (data.avatar)      localStorage.setItem("adminAvatar", data.avatar);
       if (data.permissions) localStorage.setItem("accessPermissions", JSON.stringify({ [data.role]: data.permissions }));
-      if (data.avatar) { localStorage.setItem("adminAvatar", data.avatar); window.dispatchEvent(new Event("avatarChanged")); }
 
       if (data.role === "Admin") {
         navigate("/admin/dashboard");
@@ -199,9 +199,10 @@ export default function AdminLogin() {
 
           <div className="lg:hidden text-center mt-6">
             <button onClick={() => navigate("/login")} className="text-maroon text-sm font-semibold hover:underline">
-              Login with OTP instead →
+              Login With Number →
             </button>
           </div>
+
         </div>
 
         <p className="absolute bottom-6 text-gray-400 text-xs">

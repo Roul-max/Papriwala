@@ -23,11 +23,33 @@ export default function AdminProfile() {
   const isAdmin = role === "Admin";
 
   useEffect(() => {
-    const savedAvatar = localStorage.getItem("adminAvatar");
-    const savedName = localStorage.getItem("adminName") || (isAdmin ? "Super Admin" : "");
-    if (savedAvatar) setAvatar(savedAvatar);
-    setDisplayName(savedName);
-    setNameInput(savedName);
+    if (isAdmin) {
+      apiFetch("/api/settings").then(r => r.json()).then((s: any) => {
+        const name = s.adminName || "Super Admin";
+        setDisplayName(name); setNameInput(name);
+        localStorage.setItem("adminName", name);
+        setAvatar(s.adminAvatar || null);
+        window.dispatchEvent(new Event("avatarChanged"));
+      }).catch(() => {
+        const n = localStorage.getItem("adminName") || "Super Admin";
+        setDisplayName(n); setNameInput(n);
+      });
+    } else {
+      // Employee: fetch own name + avatar from DB via /auth/me
+      apiFetch("/api/auth/me").then(r => r.json()).then((me: any) => {
+        const name = me.name || localStorage.getItem("adminName") || "";
+        setDisplayName(name);
+        localStorage.setItem("adminName", name);
+        const av = me.avatar || null;
+        setAvatar(av);
+        if (av) localStorage.setItem("adminAvatar", av);
+        else localStorage.removeItem("adminAvatar");
+        window.dispatchEvent(new Event("avatarChanged"));
+      }).catch(() => {
+        setDisplayName(localStorage.getItem("adminName") || "");
+        setAvatar(localStorage.getItem("adminAvatar") || null);
+      });
+    }
   }, []);
 
   // ── Delete avatar ───────────────────────────────────────────────────────────
@@ -49,26 +71,27 @@ export default function AdminProfile() {
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64 = reader.result as string;
+    const canvas = document.createElement("canvas");
+    const img = new Image();
+    img.onload = async () => {
+      const MAX = 200;
+      const ratio = Math.min(MAX / img.width, MAX / img.height, 1);
+      canvas.width  = img.width  * ratio;
+      canvas.height = img.height * ratio;
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const base64 = canvas.toDataURL("image/jpeg", 0.7);
       setAvatar(base64);
       localStorage.setItem("adminAvatar", base64);
       window.dispatchEvent(new Event("avatarChanged"));
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-      // Persist to server for all roles
-      const id = isAdmin ? "admin" : employeeId;
       const endpoint = isAdmin ? "/api/auth/update-avatar" : `/api/employees/${employeeId}`;
-      if (id) {
-        await apiFetch(endpoint, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ avatar: base64 }),
-        });
-      }
+      const res = await apiFetch(endpoint, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ avatar: base64 }),
+      });
+      if (res.ok) { setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 3000); }
     };
-    reader.readAsDataURL(file);
+    img.src = URL.createObjectURL(file);
   };
 
   // ── Rename ──────────────────────────────────────────────────────────────────
@@ -84,9 +107,16 @@ export default function AdminProfile() {
         body: JSON.stringify({ name: trimmed, full_name: trimmed }),
       });
       if (!res.ok) { setNameError("Failed to save. Try again."); return; }
+    } else if (isAdmin) {
+      await apiFetch("/api/auth/update-avatar", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
     }
     setDisplayName(trimmed);
     localStorage.setItem("adminName", trimmed);
+    window.dispatchEvent(new Event("avatarChanged"));
     setEditingName(false);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
@@ -153,8 +183,10 @@ export default function AdminProfile() {
               </div>
             )}
 
-            {/* Name with inline edit */}
-            {editingName ? (
+            {/* Name — editable for Admin only, read-only for Employee */}
+            {!isAdmin ? (
+              <h2 className="text-xl font-bold text-gray-800 mb-1">{displayName}</h2>
+            ) : editingName ? (
               <div className="w-full mb-2">
                 <input
                   type="text"

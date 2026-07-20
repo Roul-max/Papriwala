@@ -19,9 +19,13 @@ export default function AdminDashboard() {
       ]);
       setAnalytics(a);
       setRecentOrders(o.slice(0, 5));
-      const today = new Date().toISOString().split("T")[0];
+      const istOffset = 5.5 * 60 * 60 * 1000;
+      const today = new Date(Date.now() + istOffset).toISOString().split("T")[0];
       const units = o
-        .filter((ord: any) => ord.order_status === "Paid" && ord.timestamp?.startsWith(today))
+        .filter((ord: any) => {
+          if (ord.order_status !== "Paid" || !ord.timestamp) return false;
+          return new Date(new Date(ord.timestamp).getTime() + istOffset).toISOString().startsWith(today);
+        })
         .reduce((sum: number, ord: any) => sum + (ord.items?.reduce((s: number, it: any) => s + (it.qty || 1), 0) || 0), 0);
       setTotalUnitsSold(units);
     } finally {

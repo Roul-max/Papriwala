@@ -41,14 +41,18 @@ export default function POS() {
   const isReadOnly = access === "Read-Only";
 
   const refreshAnalytics = () => {
-    const today = new Date().toISOString().split("T")[0];
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const today = new Date(Date.now() + istOffset).toISOString().split("T")[0];
     Promise.all([
       apiFetch("/api/analytics").then(res => res.json()),
       apiFetch("/api/orders").then(res => res.json()),
     ]).then(([a, orders]) => {
       setAnalytics(a || analytics);
       const units = (Array.isArray(orders) ? orders : [])
-        .filter((o: any) => o.order_status === "Paid" && o.timestamp?.startsWith(today))
+        .filter((o: any) => {
+          if (o.order_status !== "Paid" || !o.timestamp) return false;
+          return new Date(new Date(o.timestamp).getTime() + istOffset).toISOString().startsWith(today);
+        })
         .reduce((sum: number, o: any) => sum + (o.items?.reduce((s: number, it: any) => s + (it.qty || 1), 0) || 0), 0);
       setTotalUnitsSold(units);
     });
@@ -217,22 +221,22 @@ export default function POS() {
     // Totals
     doc.setFont("courier", "normal"); doc.setFontSize(7);
     doc.text(`Total Qty: ${totalQty}`, lx, y);
-    doc.text(`Sub Total: ${subtotal.toFixed(2)}`, rx, y, { align: "right" });
+    doc.text(`Sub Total: Rs.${subtotal.toFixed(2)}`, rx, y, { align: "right" });
     y += 10;
-    if (discountTotal > 0) { doc.text(`Discount:`, lx, y); doc.text(`-${discountTotal.toFixed(2)}`, rx, y, { align: "right" }); y += 10; }
-    if (otherCharges > 0) { doc.text(`Other Charges:`, lx, y); doc.text(otherCharges.toFixed(2), rx, y, { align: "right" }); y += 10; }
-    doc.text(`Tax (5%):`, lx, y); doc.text(taxes.toFixed(2), rx, y, { align: "right" }); y += 10;
+    if (discountTotal > 0) { doc.text(`Discount:`, lx, y); doc.text(`-Rs.${discountTotal.toFixed(2)}`, rx, y, { align: "right" }); y += 10; }
+    if (otherCharges > 0) { doc.text(`Other Charges:`, lx, y); doc.text(`Rs.${otherCharges.toFixed(2)}`, rx, y, { align: "right" }); y += 10; }
+    doc.text(`Tax (5%):`, lx, y); doc.text(`Rs.${taxes.toFixed(2)}`, rx, y, { align: "right" }); y += 10;
     doc.setFont("courier", "italic"); doc.setFontSize(6.5);
-    line("[ Net Total Inclusive of GST ]", 6.5, false);
+    doc.text("[ Net Total Inclusive of GST ]", cx, y, { align: "center" }); y += 10;
     divider();
 
     // Grand Total
     doc.setFont("courier", "bold"); doc.setFontSize(11);
     doc.text("Grand Total", lx, y);
-    doc.text(`Rs. ${grandTotal.toFixed(2)}`, rx, y, { align: "right" });
+    doc.text(`Rs.${grandTotal.toFixed(2)}`, rx, y, { align: "right" });
     y += 16;
     doc.setFont("courier", "normal"); doc.setFontSize(7);
-    line(`Paid via: ${paymentMode}`, 7, false);
+    doc.text(`Paid via: ${paymentMode}`, cx, y, { align: "center" }); y += 10;
     divider();
 
     // Footer
@@ -301,7 +305,7 @@ export default function POS() {
       <div class="row"><span>Tax (5%)</span><span>&#8377;${taxes.toFixed(2)}</span></div>
       <div class="sub" style="margin:2px 0">[ Net Total Inclusive of GST ]</div>
       ${dash}
-      <div class="grand"><span>Grand Total</span><span>&#8377;${grandTotal.toFixed(2)}</span></div>
+      <div class="grand"><span>Grand Total</span><span>&#x20B9;${grandTotal.toFixed(2)}</span></div>
       <div class="sub" style="margin:2px 0">Paid via: ${paymentMode}</div>
       ${dash}
       <div class="bold center" style="margin-top:4px">Thank You &amp; Visit Again..!!</div>
@@ -314,7 +318,7 @@ export default function POS() {
   const handleWhatsAppShare = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customerPhone || customerPhone.length !== 10) return;
-    const msg = encodeURIComponent(`Your invoice ${invoiceNo} total: Rs.${grandTotal.toFixed(2)}. Thank you for visiting Papriwale!`);
+    const msg = encodeURIComponent(`Your invoice ${invoiceNo} total: ₹${grandTotal.toFixed(2)}. Thank you for visiting Papriwale!`);
     window.open(`https://wa.me/91${customerPhone}?text=${msg}`, "_blank");
     setShowWhatsAppModal(false);
     setCustomerPhone("");

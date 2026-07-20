@@ -1,4 +1,4 @@
-import { roleAuthMiddleware, createSession, destroySession, checkRateLimit, resetRateLimit } from "./middleware.js";
+import { roleAuthMiddleware, createSession, destroySession, checkRateLimit, resetRateLimit, getSession } from "./middleware.js";
 import { Router } from "express";
 import { db, supabase, dbSelect, dbInsert, dbUpdate, dbDelete } from "./db.js";
 import { broadcast } from "./ws.js";
@@ -40,7 +40,7 @@ router.post("/auth/login", async (req, res) => {
     if (isMatch) {
       resetRateLimit(ip);
       const token = await createSession("Admin", "Super Admin");
-      return res.json({ success: true, role: "Admin", name: "Super Admin", sessionToken: token, avatar: db.settings?.adminAvatar || null });
+      return res.json({ success: true, role: "Admin", name: db.settings?.adminName || "Super Admin", sessionToken: token, avatar: db.settings?.adminAvatar || null });
     }
   }
 
@@ -241,6 +241,19 @@ router.post("/auth/logout", async (req, res) => {
     }
   }
   res.json({ success: true });
+});
+
+// ─── Self-profile endpoint (any authenticated employee) ─────────────────────
+router.get("/auth/me", async (req: any, res) => {
+  const token = req.header("X-Session-Token") || "";
+  if (!token) return res.status(401).json({ error: "No token" });
+  const session = await getSession(token);
+  if (!session) return res.status(401).json({ error: "Invalid session" });
+  if (!session.employeeId) return res.json({ name: session.name, avatar: null });
+  const employees = await dbSelect("employees", db.employees);
+  const emp = employees.find((e: any) => e.id === session.employeeId);
+  if (!emp) return res.status(404).json({ error: "Not found" });
+  res.json({ name: emp.name || emp.full_name || "", avatar: emp.avatar || null });
 });
 
 // ─── Apply auth middleware ────────────────────────────────────────────────────
@@ -579,12 +592,18 @@ router.post("/settings", async (req, res) => {
   res.json(db.settings);
 });
 
-// ─── Admin avatar persist ──────────────────────────────────────────────────────
+// ─── Admin avatar / name persist ─────────────────────────────────────────────
 router.patch("/auth/update-avatar", async (req, res) => {
-  const { avatar } = req.body;
-  if (!avatar) return res.status(400).json({ error: "avatar required" });
-  db.settings = { ...db.settings, adminAvatar: avatar };
-  if (supabase) await supabase.from("settings").upsert({ id: 1, value: db.settings });
+  const { avatar, name } = req.body;
+  const patch: any = {};
+  if (avatar !== undefined) patch.adminAvatar = avatar;  // null clears it
+  if (name   !== undefined) patch.adminName   = sanitize(name);
+  if (Object.keys(patch).length === 0) return res.status(400).json({ error: "avatar or name required" });
+  db.settings = { ...db.settings, ...patch };
+  if (supabase) {
+    const { error } = await supabase.from("settings").upsert({ id: 1, value: db.settings });
+    if (error) { console.error("[update-avatar] Supabase upsert failed:", error.message); return res.status(500).json({ error: error.message }); }
+  }
   res.json({ success: true });
 });
 
@@ -603,6 +622,50 @@ router.post("/auth/change-password", async (req, res) => {
     await supabase.from("settings").upsert({ id: 1, value: { ...db.settings, adminPasswordHash: db.adminPasswordHash } });
 
   res.json({ success: true });
+});
+
+// ─── Raw Material Due-Soon Alerts ───────────────────────────────────────────
+router.get("/raw-material-purchases/due-alerts", async (_req, res) => {
+  if (!db.raw_material_purchases) db.raw_material_purchases = [];
+  const all = await dbSelect("raw_material_purchases", db.raw_material_purchases);
+  const today = new Date().toISOString().split("T")[0];
+  const twoDaysLater = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const dealers = await dbSelect("dealers", db.dealers);
+
+  const dueSoon = all.filter((r: any) => !r.is_paid && r.due_date && r.due_date >= today && r.due_date <= twoDaysLater);
+  const overdue = all.filter((r: any) => !r.is_paid && r.due_date && r.due_date < today);
+
+  // Broadcast WebSocket notifications for due-soon
+  for (const r of dueSoon) {
+    const dealer = dealers.find((d: any) => d.id === r.dealer_id);
+    broadcast({
+      type: "PAYMENT_DUE_SOON",
+      payload: {
+        purchase_id: r.id,
+        material_name: r.material_name,
+        dealer_name: dealer?.name || "Unknown Dealer",
+        amount: (r.qty * r.rate_per_unit).toFixed(2),
+        due_date: r.due_date,
+      },
+    });
+  }
+
+  // Broadcast for overdue
+  for (const r of overdue) {
+    const dealer = dealers.find((d: any) => d.id === r.dealer_id);
+    broadcast({
+      type: "PAYMENT_OVERDUE",
+      payload: {
+        purchase_id: r.id,
+        material_name: r.material_name,
+        dealer_name: dealer?.name || "Unknown Dealer",
+        amount: (r.qty * r.rate_per_unit).toFixed(2),
+        due_date: r.due_date,
+      },
+    });
+  }
+
+  res.json({ dueSoon: dueSoon.length, overdue: overdue.length });
 });
 
 // ─── Raw Material Purchases ───────────────────────────────────────────────────
