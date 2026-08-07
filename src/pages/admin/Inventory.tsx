@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Package, AlertTriangle, XCircle, Search, Plus, X, Trash2, ArrowDownCircle, ArrowUpCircle, EyeOff } from "lucide-react";
+import { Package, AlertTriangle, XCircle, Search, Plus, X, Trash2, ArrowDownCircle, ArrowUpCircle, EyeOff, Edit2 } from "lucide-react";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
-
-type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; muted?: boolean; image?: string; };
+type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; muted?: boolean; image?: string; unit?: string; };
 type LogEntry = { id: string; type: "STOCK_IN" | "STOCK_OUT"; product_name: string; qty: number; reason: string; operator: string; timestamp: string; };
 
 const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs", image: "" };
@@ -18,6 +17,7 @@ export default function Inventory() {
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editProductId, setEditProductId] = useState<string | null>(null);
   const [addForm, setAddForm] = useState({ ...EMPTY_PRODUCT });
   const [addError, setAddError] = useState("");
 
@@ -80,12 +80,21 @@ export default function Inventory() {
       setAddError("All fields are required.");
       return;
     }
-    await apiFetch("/api/products", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...addForm, unit_purchase_cost: Number(addForm.unit_purchase_cost), price: Number(addForm.price), current_stock_qty: Number(addForm.current_stock_qty), safety_low_threshold: Number(addForm.safety_low_threshold) })
-    });
+    if (editProductId) {
+      await apiFetch(`/api/products/${editProductId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...addForm, unit_purchase_cost: Number(addForm.unit_purchase_cost), price: Number(addForm.price), current_stock_qty: Number(addForm.current_stock_qty), safety_low_threshold: Number(addForm.safety_low_threshold) })
+      });
+    } else {
+      await apiFetch("/api/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...addForm, unit_purchase_cost: Number(addForm.unit_purchase_cost), price: Number(addForm.price), current_stock_qty: Number(addForm.current_stock_qty), safety_low_threshold: Number(addForm.safety_low_threshold) })
+      });
+    }
     setShowAddModal(false);
+    setEditProductId(null);
     setAddForm({ ...EMPTY_PRODUCT });
     fetchAll();
   };
@@ -226,6 +235,8 @@ export default function Inventory() {
                     <div className="flex justify-end gap-1">
                       {!isReadOnly && (
                         <>
+                          <button onClick={() => { setEditProductId(p.id); setAddForm({ name: p.name, sku: p.sku, category: p.category, unit_purchase_cost: String(p.unit_purchase_cost), price: String(p.price), current_stock_qty: String(p.current_stock_qty), safety_low_threshold: String(p.safety_low_threshold), unit: p.unit || "pcs", image: p.image || "" }); setShowAddModal(true); }}
+                            className="text-blue-600 hover:bg-blue-50 p-1.5 rounded" title="Edit"><Edit2 size={16} /></button>
                           <button onClick={() => { setStockModal({ product: p, type: "in" }); setStockQty(""); setStockReason(""); setStockError(""); }}
                             className="text-green-600 hover:bg-green-50 p-1.5 rounded" title="Stock In"><ArrowDownCircle size={16} /></button>
                           <button onClick={() => { setStockModal({ product: p, type: "out" }); setStockQty(""); setStockReason(""); setStockError(""); }}
@@ -299,8 +310,8 @@ export default function Inventory() {
         <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl w-full max-w-md shadow-2xl max-h-[90vh] flex flex-col">
             <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl">
-              <h3 className="font-bold text-maroon text-lg">Add New Product</h3>
-              <button onClick={() => setShowAddModal(false)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+              <h3 className="font-bold text-maroon text-lg">{editProductId ? "Edit Product" : "Add New Product"}</h3>
+              <button onClick={() => { setShowAddModal(false); setEditProductId(null); setAddForm({ ...EMPTY_PRODUCT }); }}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
             </div>
             <form onSubmit={handleAddProduct} className="p-5 space-y-3 overflow-y-auto flex-1">
               {/* Product Image */}
@@ -348,7 +359,7 @@ export default function Inventory() {
               ))}
               {addError && <p className="text-red-500 text-sm">{addError}</p>}
               <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">
-                Add Product
+                {editProductId ? "Save Changes" : "Add Product"}
               </button>
             </form>
           </div>

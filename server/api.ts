@@ -432,6 +432,19 @@ router.patch("/orders/:id", async (req, res) => {
   res.json({ ...order, ...req.body });
 });
 
+// ─── Void (soft-delete) an order ─────────────────────────────────────────────
+router.patch("/orders/:id/void", async (req, res) => {
+  const session = (req as any).session;
+  const orders = await dbSelect("orders", db.orders);
+  const order = orders.find((o: any) => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: "Not found" });
+  const patch = { order_status: "Void", voided_by: session?.name || "Unknown", voided_at: new Date().toISOString() };
+  await dbUpdate("orders", req.params.id, patch);
+  const local = db.orders.find((o: any) => o.id === req.params.id);
+  if (local) Object.assign(local, patch);
+  res.json({ success: true });
+});
+
 // ─── Omni-Search ─────────────────────────────────────────────────────────────
 router.get("/search", async (req, res) => {
   const query = req.query.q?.toString().toLowerCase() || "";

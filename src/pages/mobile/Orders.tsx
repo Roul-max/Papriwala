@@ -31,7 +31,7 @@ export default function Orders() {
         <h2 className="font-serif text-xl text-gold font-bold uppercase tracking-wider">MY ORDERS</h2>
       </div>
 
-      <div className="p-4 space-y-4">
+      <div className="p-4 space-y-4 overflow-y-auto" style={{ maxHeight: "calc(7 * 140px)" }}>
         {loading ? (
           <div className="flex justify-center py-12 text-maroon"><Loader2 size={32} className="animate-spin" /></div>
         ) : orders.length === 0 ? (

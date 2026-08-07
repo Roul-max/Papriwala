@@ -23,13 +23,26 @@ export default function POS() {
   const [variantQty, setVariantQty] = useState(1);
   const [variantCustomPrice, setVariantCustomPrice] = useState<number | "">("");
   const [quickAddModal, setQuickAddModal] = useState<{ product: any } | null>(null);
-  const [quickQty, setQuickQty] = useState(1);
-  const [quickPrice, setQuickPrice] = useState<number>(0);
-  const [quickUnit, setQuickUnit] = useState("");
+  const [quickQty, setQuickQty] = useState<number | "">("");
+  const [quickAmount, setQuickAmount] = useState<number | "">("");
   const [variantUnit, setVariantUnit] = useState("");
   const [paymentMode, setPaymentMode] = useState("Cash");
   const [totalUnitsSold, setTotalUnitsSold] = useState(0);
   const [invoiceNo, setInvoiceNo] = useState("");
+  const [posTab, setPosTab] = useState<"billing" | "deleted">("billing");
+  const [deletedOrders, setDeletedOrders] = useState<any[]>([]);
+
+  const fetchDeletedOrders = () =>
+    apiFetch("/api/orders").then(r => r.json()).then((d: any[]) =>
+      setDeletedOrders(Array.isArray(d) ? d.filter(o => o.order_status === "Void" && o.order_source === "Direct POS") : [])
+    );
+
+  const handleVoidOrder = async (orderId: string) => {
+    if (!confirm("Delete this bill? This cannot be undone.")) return;
+    await apiFetch(`/api/orders/${orderId}/void`, { method: "PATCH" });
+    fetchDeletedOrders();
+    refreshAnalytics();
+  };
 
   // Generate a stable invoice number once per billing session
   const generateInvoiceNo = () => {
@@ -66,6 +79,7 @@ export default function POS() {
     });
     refreshAnalytics();
     apiFetch("/api/product-variants").then(res => res.json()).then(data => setAllVariants(Array.isArray(data) ? data : []));
+    fetchDeletedOrders();
     generateInvoiceNo();
   }, []);
 
@@ -92,9 +106,8 @@ export default function POS() {
       setVariantUnit(product.unit || "pcs");
     } else {
       setQuickAddModal({ product });
-      setQuickQty(1);
-      setQuickPrice(product.price);
-      setQuickUnit(product.unit || "pcs");
+      setQuickQty("");
+      setQuickAmount("");
     }
   };
 
@@ -116,12 +129,19 @@ export default function POS() {
   const confirmQuickAdd = () => {
     if (!quickAddModal) return;
     const p = quickAddModal.product;
+    const isGm = (p.unit || "pcs").toLowerCase() === "gm";
+    const finalQty = isGm
+      ? (quickQty !== "" ? Number(quickQty) : quickAmount !== "" ? parseFloat((Number(quickAmount) / p.price).toFixed(3)) : 0)
+      : (quickQty !== "" ? Number(quickQty) : 0);
+    if (!finalQty || finalQty <= 0) return;
     setCart(prev => {
       const existing = prev.find(item => item.id === p.id);
-      if (existing) return prev.map(item => item.id === p.id ? { ...item, qty: item.qty + quickQty, price: quickPrice } : item);
-      return [...prev, { ...p, price: quickPrice, qty: quickQty, unit: quickUnit }];
+      if (existing) return prev.map(item => item.id === p.id ? { ...item, qty: item.qty + finalQty } : item);
+      return [...prev, { ...p, price: p.price, qty: finalQty, unit: p.unit || "pcs" }];
     });
     setQuickAddModal(null);
+    setQuickQty("");
+    setQuickAmount("");
   };
 
   const updateCartPrice = (id: string, price: number) => {
@@ -251,10 +271,72 @@ export default function POS() {
     doc.save(`receipt-${invoiceNo}.pdf`);
   };
 
+  const printViaIframe = (html: string) => {
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;";
+    document.body.appendChild(iframe);
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return;
+    doc.open(); doc.write(html); doc.close();
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => document.body.removeChild(iframe), 1000);
+    }, 300);
+  };
+
+  const printSubBills = (billNo: string) => {
+    const categoryMap: Record<string, any[]> = {};
+    cart.forEach((item: any) => {
+      const cat = item.category || "General";
+      if (!categoryMap[cat]) categoryMap[cat] = [];
+      categoryMap[cat].push(item);
+    });
+    const now = new Date();
+    const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getFullYear()).slice(-2)}`;
+    const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+    const dash = "-".repeat(32);
+    const pageW = 226.77;
+    Object.entries(categoryMap).forEach(([category, items], idx) => {
+      setTimeout(() => {
+        const doc = new jsPDF({ unit: "pt", format: [pageW, 600] });
+        const cx = pageW / 2;
+        const lx = 10, rx = pageW - 10;
+        let y = 16;
+        const line = (txt: string, size: number, bold = false, align: "center"|"left"|"right" = "center", x = cx) => {
+          doc.setFont("courier", bold ? "bold" : "normal");
+          doc.setFontSize(size);
+          doc.text(txt, x, y, { align });
+          y += size * 1.5;
+        };
+        const divider = () => { line(dash, 7); };
+        line("** KITCHEN / COUNTER SLIP **", 11, true);
+        line(`${category.toUpperCase()} COUNTER`, 10, true);
+        divider();
+        doc.setFont("courier", "normal"); doc.setFontSize(7);
+        doc.text(`Bill No: ${billNo.slice(-5)}`, lx, y);
+        doc.text(`${dateStr} ${timeStr}`, rx, y, { align: "right" });
+        y += 10;
+        divider();
+        doc.setFont("courier", "bold"); doc.setFontSize(7);
+        doc.text("Item", lx, y); doc.text("Qty", rx, y, { align: "right" }); y += 10;
+        divider();
+        doc.setFont("courier", "normal"); doc.setFontSize(7);
+        items.forEach((item: any) => {
+          const name = (item.name + (item.size ? ` (${item.size})` : "")).slice(0, 28);
+          doc.text(name, lx, y);
+          doc.text(`x${item.qty}`, rx, y, { align: "right" });
+          y += 10;
+        });
+        divider();
+        line(`Total Items: ${items.reduce((s: number, i: any) => s + i.qty, 0)}`, 7);
+        doc.save(`slip-${category}-${billNo.slice(-5)}.pdf`);
+      }, idx * 300);
+    });
+  };
+
   const handlePrint = () => {
     if (cart.length === 0) return;
-    const printWindow = window.open("", "", "height=900,width=400");
-    if (!printWindow) return;
     const now = new Date();
     const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getFullYear()).slice(-2)}`;
     const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
@@ -267,20 +349,19 @@ export default function POS() {
       const name = (item.name + (item.size ? ` (${item.size})` : "")).slice(0, 24);
       return `<div class="item-row"><span class="iname">${name}</span><span class="iqty">${item.qty}</span><span class="irate">${item.price.toFixed(2)}</span><span class="iamt">${(item.price*item.qty).toFixed(2)}</span></div>`;
     }).join("");
-    printWindow.document.write(`<html><head><title>Receipt</title><style>
+    printViaIframe(`<html><head><style>
       *{margin:0;padding:0;box-sizing:border-box}
       body{font-family:'Courier New',Courier,monospace;font-size:11px;color:#000;background:#fff;width:300px;margin:0 auto;padding:10px 6px}
-      .center{text-align:center} .left{text-align:left} .bold{font-weight:bold}
+      .center{text-align:center}.bold{font-weight:bold}
       .brand{font-size:14px;font-weight:bold;text-align:center}
       .sub{font-size:10px;text-align:center}
-      .div{text-align:center;letter-spacing:0;font-size:10px;margin:4px 0}
+      .div{text-align:center;font-size:10px;margin:4px 0}
       .row{display:flex;justify-content:space-between;font-size:10px;margin:1px 0}
       .col-header{display:flex;justify-content:space-between;font-weight:bold;font-size:10px;margin:2px 0}
       .item-row{display:flex;font-size:10px;margin:2px 0}
-      .iname{flex:2;overflow:hidden} .iqty{flex:0.5;text-align:right} .irate{flex:0.8;text-align:right} .iamt{flex:0.8;text-align:right}
+      .iname{flex:2;overflow:hidden}.iqty{flex:0.5;text-align:right}.irate{flex:0.8;text-align:right}.iamt{flex:0.8;text-align:right}
       .grand{display:flex;justify-content:space-between;font-size:14px;font-weight:bold;margin:4px 0}
-      @page{size:80mm auto;margin:0}
-      @media print{body{width:80mm;margin:0 auto}}
+      @page{size:80mm auto;margin:0}@media print{body{width:80mm;margin:0 auto}}
     </style></head><body>
       <div class="brand">Shri Badrinarayan Papriwale</div>
       <div class="sub">Sweets | Namkeen | Bakery</div>
@@ -311,8 +392,6 @@ export default function POS() {
       <div class="bold center" style="margin-top:4px">Thank You &amp; Visit Again..!!</div>
       <div class="sub center">www.papriwale.com</div>
     </body></html>`);
-    printWindow.document.close();
-    setTimeout(() => { printWindow.print(); printWindow.close(); }, 400);
   };
 
   const handleWhatsAppShare = (e: React.FormEvent) => {
@@ -332,7 +411,8 @@ export default function POS() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: paymentMode, items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, created_by: createdBy })
     });
-    handlePrint();
+    handleExportPDF();       // main bill — downloads PDF directly
+    printSubBills(invoiceNo); // sub bills per category for staff
     setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
     generateInvoiceNo();
     refreshAnalytics();
@@ -348,7 +428,44 @@ export default function POS() {
   ];
 
   return (
-    <div className="h-full flex flex-col space-y-4">
+    <div className="flex flex-col space-y-4" style={{minHeight: "calc(100vh - 80px)"}}>
+      {/* Tab switcher */}
+      <div className="flex gap-2">
+        <button onClick={() => setPosTab("billing")} className={`px-4 py-2 rounded text-sm font-semibold transition-colors ${posTab === "billing" ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>POS Billing</button>
+        <button onClick={() => { setPosTab("deleted"); fetchDeletedOrders(); }} className={`px-4 py-2 rounded text-sm font-semibold transition-colors ${posTab === "deleted" ? "bg-red-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>Deleted Bills</button>
+      </div>
+
+      {posTab === "deleted" && (
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="py-3 px-4">Bill No</th>
+                <th className="py-3 px-4">Date</th>
+                <th className="py-3 px-4">Items</th>
+                <th className="py-3 px-4">Total</th>
+                <th className="py-3 px-4">Voided By</th>
+                <th className="py-3 px-4">Voided At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deletedOrders.length === 0 && <tr><td colSpan={6} className="py-8 text-center text-gray-400 italic">No deleted bills.</td></tr>}
+              {deletedOrders.map(o => (
+                <tr key={o.id} className="border-b border-gray-100 bg-red-50/40">
+                  <td className="py-3 px-4 font-mono text-xs font-bold text-red-700">{o.id}</td>
+                  <td className="py-3 px-4 text-xs text-gray-500">{o.timestamp ? new Date(o.timestamp).toLocaleString() : "—"}</td>
+                  <td className="py-3 px-4 text-xs text-gray-600">{o.items?.map((i: any) => `${i.name} x${i.qty}`).join(", ") || "—"}</td>
+                  <td className="py-3 px-4 font-bold text-gray-700">₹{Number(o.grand_total).toFixed(2)}</td>
+                  <td className="py-3 px-4 text-xs text-gray-500">{o.voided_by || "—"}</td>
+                  <td className="py-3 px-4 text-xs text-gray-400">{o.voided_at ? new Date(o.voided_at).toLocaleString() : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {posTab === "billing" && (<>
       {/* §2.2.1 Live Analytics Ribbon */}
       <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
         {ribbonCards.map((m, i) => (
@@ -359,7 +476,7 @@ export default function POS() {
         ))}
       </div>
 
-      <div className="flex-1 flex gap-4 min-h-0">
+      <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
         {/* Left: Product Catalog */}
         <div className="flex-[2] bg-white rounded-lg border border-gray-200 flex flex-col overflow-hidden shadow-sm">
           <div className="p-4 border-b border-gray-100 flex gap-4 items-center bg-gray-50">
@@ -371,11 +488,12 @@ export default function POS() {
               <input type="text" placeholder="Search products by name or SKU..." className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded text-sm" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
             </div>
           </div>
-          <div className="flex-1 overflow-auto p-4">
+          <div className="overflow-y-auto p-4" style={{maxHeight: "calc(12 * 52px + 48px)"}}>
             <table className="w-full text-sm text-left">
               <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="py-3 px-4">Product</th>
+                  <th className="py-3 px-4">SKU</th>
                   <th className="py-3 px-4">Category</th>
                   <th className="py-3 px-4">Stock</th>
                   <th className="py-3 px-4">Price</th>
@@ -387,6 +505,7 @@ export default function POS() {
                 {filteredProducts.map(p => (
                   <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     <td className="py-3 px-4 font-medium text-gray-800">{p.name}</td>
+                    <td className="py-3 px-4 font-mono text-xs text-gray-500">{p.sku || "—"}</td>
                     <td className="py-3 px-4 text-gray-500">{p.category}</td>
                     <td className="py-3 px-4">{p.current_stock_qty}</td>
                     <td className="py-3 px-4">₹{p.price}</td>
@@ -402,14 +521,14 @@ export default function POS() {
                     </td>
                   </tr>
                 ))}
-                {filteredProducts.length === 0 && <tr><td colSpan={6} className="py-8 text-center text-gray-400 italic">No products match your filter.</td></tr>}
+                {filteredProducts.length === 0 && <tr><td colSpan={7} className="py-8 text-center text-gray-400 italic">No products match your filter.</td></tr>}
               </tbody>
             </table>
           </div>
         </div>
 
         {/* Right: Billing Summary */}
-        <div className="flex-1 bg-white rounded-lg border border-gray-200 flex flex-col shadow-sm">
+        <div className="flex-[1.2] min-w-[340px] bg-white rounded-lg border border-gray-200 flex flex-col shadow-sm">
           <div className="p-4 border-b border-gray-100 bg-maroon text-white font-serif font-semibold rounded-t-lg flex items-center justify-between">
             <span>Billing Summary</span>
             {isReadOnly && (
@@ -418,7 +537,7 @@ export default function POS() {
               </span>
             )}
           </div>
-          <div className="flex-1 overflow-auto">
+          <div className="overflow-y-auto" style={{maxHeight: "calc(6 * 52px)"}}>
             {cart.length === 0 ? (
               <div className="text-center text-gray-400 py-16 flex flex-col items-center">
                 <ShoppingCart size={48} className="mb-3 opacity-20" />
@@ -443,14 +562,8 @@ export default function POS() {
                         <p className="font-semibold text-gray-800 text-xs leading-tight">{item.name}</p>
                         {item.size && <p className="text-[10px] text-gray-400 mt-0.5">{item.size}</p>}
                       </td>
-                      <td className="px-1 py-2">
-                        <input type="text" value={item.unit || "pcs"} onChange={e => updateCartUnit(item.id, e.target.value)}
-                          className="w-full border border-gray-300 rounded px-1 py-1 text-xs text-center focus:border-maroon focus:outline-none" />
-                      </td>
-                      <td className="px-1 py-2">
-                        <input type="number" min="0" step="0.01" value={item.price} onChange={e => updateCartPrice(item.id, Number(e.target.value))}
-                          className="w-full border border-gray-300 rounded px-1 py-1 text-xs text-center focus:border-maroon focus:outline-none" />
-                      </td>
+                      <td className="px-1 py-2 text-center text-xs text-gray-500 font-semibold">{item.unit || "pcs"}</td>
+                      <td className="px-1 py-2 text-center text-xs text-gray-700 font-semibold">₹{item.price}</td>
                       <td className="px-1 py-2">
                         <input type="number" min="0.01" step="0.01" value={item.qty} onChange={e => updateCartQty(item.id, Number(e.target.value))}
                           className="w-full border border-gray-300 rounded px-1 py-1 text-xs text-center focus:border-maroon focus:outline-none" />
@@ -468,23 +581,23 @@ export default function POS() {
             )}
           </div>
 
-          <div className="border-t border-gray-200 bg-gray-50 px-3 py-2 space-y-1.5">
+          <div className="border-t border-gray-200 bg-gray-50 px-4 py-3 space-y-2">
             {/* Discount + Other Charges inline */}
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-3 gap-2">
               <div>
-                <label className="text-[9px] text-gray-400 uppercase font-semibold">Disc ₹</label>
+                <label className="text-[10px] text-gray-400 uppercase font-semibold">Disc ₹</label>
                 <input type="number" min="0" step="0.01" max={subtotal} value={discountFlat}
                   onChange={e => { const v = Math.min(Number(e.target.value), subtotal); setDiscountFlat(v); setDiscountPercent(subtotal > 0 ? parseFloat(((v / subtotal) * 100).toFixed(2)) : 0); }}
                   className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
               </div>
               <div>
-                <label className="text-[9px] text-gray-400 uppercase font-semibold">Disc %</label>
+                <label className="text-[10px] text-gray-400 uppercase font-semibold">Disc %</label>
                 <input type="number" min="0" step="0.01" max="100" value={discountPercent}
                   onChange={e => { const v = Math.min(100, Math.max(0, Number(e.target.value))); setDiscountPercent(v); setDiscountFlat(parseFloat(((subtotal * v) / 100).toFixed(2))); }}
                   className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
               </div>
               <div>
-                <label className="text-[9px] text-gray-400 uppercase font-semibold">Other ₹</label>
+                <label className="text-[10px] text-gray-400 uppercase font-semibold">Other ₹</label>
                 <input type="number" min="0" step="0.01" value={otherCharges} onChange={e => setOtherCharges(Number(e.target.value))} className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
               </div>
             </div>
@@ -504,25 +617,45 @@ export default function POS() {
               onChange={e => setOtherChargesDesc(e.target.value)}
               className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
             {/* Payment mode */}
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-3 gap-2">
               {["Cash", "UPI", "Card"].map(mode => (
                 <button key={mode} disabled={isReadOnly}
                   onClick={() => setPaymentMode(mode)}
-                  className={`border-2 rounded py-1.5 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${paymentMode === mode ? "border-maroon bg-maroon text-white" : "bg-white border-gray-300 hover:border-maroon hover:text-maroon"}`}>
+                  className={`border-2 rounded py-2 text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${paymentMode === mode ? "border-maroon bg-maroon text-white" : "bg-white border-gray-300 hover:border-maroon hover:text-maroon"}`}>
                   {mode}
                 </button>
               ))}
             </div>
             {/* Place & Print — single combined button */}
             <button onClick={handlePlaceAndPrint} disabled={isReadOnly || cart.length === 0}
-              className="w-full bg-maroon hover:bg-maroon-light text-white font-bold py-2 rounded text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+              className="w-full bg-maroon hover:bg-maroon-light text-white font-bold py-2.5 rounded text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
               <Printer size={14} /> Place &amp; Print
             </button>
-            <div className="grid grid-cols-2 gap-1.5">
-              <button onClick={handleExportPDF} className="bg-gold hover:bg-yellow-600 text-white font-semibold py-1.5 rounded flex items-center justify-center gap-1 text-xs">
+            <button onClick={async () => {
+              if (cart.length === 0) return;
+              if (!confirm("Delete this bill? Cart will be cleared.")) return;
+              const createdBy = localStorage.getItem("adminName") || "Admin";
+              const res = await apiFetch("/api/orders", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: paymentMode, items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, created_by: createdBy })
+              });
+              const saved = await res.json();
+              if (saved?.id) {
+                await apiFetch(`/api/orders/${saved.id}/void`, { method: "PATCH" });
+              }
+              setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
+              generateInvoiceNo();
+              fetchDeletedOrders();
+            }} disabled={cart.length === 0}
+              className="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-semibold py-2.5 rounded text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+              <Trash2 size={14} /> Delete Bill
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={handleExportPDF} className="bg-gold hover:bg-yellow-600 text-white font-semibold py-2 rounded flex items-center justify-center gap-1 text-sm">
                 <FileDown size={13} /> PDF
               </button>
-              <button onClick={() => setShowWhatsAppModal(true)} className="bg-[#25D366] hover:bg-[#128C7E] text-white font-semibold py-1.5 rounded flex items-center justify-center gap-1 text-xs">
+              <button onClick={() => setShowWhatsAppModal(true)} className="bg-[#25D366] hover:bg-[#128C7E] text-white font-semibold py-2 rounded flex items-center justify-center gap-1 text-sm">
                 <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp" className="w-3.5 h-3.5" /> WA
               </button>
             </div>
@@ -579,37 +712,78 @@ export default function POS() {
       )}
 
       {/* Quick Add Modal for products without variants */}
-      {quickAddModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">
-          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-gray-100 bg-cream-light flex items-center justify-between">
-              <h3 className="font-serif text-lg text-maroon font-bold">ADD TO BILL</h3>
-              <button onClick={() => setQuickAddModal(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-            </div>
-            <div className="p-5">
-              <p className="font-semibold text-gray-800 mb-4">{quickAddModal.product.name}</p>
-              <div className="grid grid-cols-3 gap-3 mb-5">
-                <div>
-                  <label className="text-[10px] text-gray-500 uppercase font-semibold">Unit</label>
-                  <input type="text" value={quickUnit} onChange={e => setQuickUnit(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2 text-sm" placeholder="pcs, kg, ltr..." />
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-500 uppercase font-semibold">Price (₹)</label>
-                  <input type="number" min="0" step="0.01" value={quickPrice} onChange={e => setQuickPrice(Number(e.target.value))} className="w-full border border-gray-300 rounded px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-500 uppercase font-semibold">Quantity</label>
-                  <input type="number" min="1" value={quickQty} onChange={e => setQuickQty(Math.max(1, Number(e.target.value)))} className="w-full border border-gray-300 rounded px-3 py-2 text-sm" />
-                </div>
+      {quickAddModal && (() => {
+        const p = quickAddModal.product;
+        const unit = (p.unit || "pcs").toLowerCase();
+        const isGm = unit === "gm";
+        const computedAmount = isGm
+          ? (quickQty !== "" ? parseFloat((Number(quickQty) * p.price).toFixed(2)) : quickAmount)
+          : (quickQty !== "" ? parseFloat((Number(quickQty) * p.price).toFixed(2)) : "");
+        const computedQty = isGm && quickAmount !== "" && quickQty === ""
+          ? parseFloat((Number(quickAmount) / p.price).toFixed(3))
+          : quickQty;
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">
+            <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
+              <div className="p-4 border-b border-gray-100 bg-cream-light flex items-center justify-between">
+                <h3 className="font-serif text-lg text-maroon font-bold">ADD TO BILL</h3>
+                <button onClick={() => setQuickAddModal(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
               </div>
-              <p className="text-center text-sm text-gray-500 mb-4">Total: <span className="font-bold text-maroon">₹{(quickPrice * quickQty).toFixed(2)}</span></p>
-              <button onClick={confirmQuickAdd} className="w-full bg-maroon text-white font-bold py-3 rounded-lg hover:bg-maroon-light transition-colors uppercase tracking-wider text-sm">
-                ADD TO BILL
-              </button>
+              <div className="p-5">
+                <p className="font-semibold text-gray-800 mb-1">{p.name}</p>
+                <div className="flex gap-3 mb-4">
+                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded font-semibold select-none">{p.unit || "pcs"}</span>
+                  <span className="text-xs bg-maroon/10 text-maroon px-2 py-1 rounded font-semibold select-none">₹{p.price} / {p.unit || "pcs"}</span>
+                </div>
+                <div className={`grid gap-3 mb-4 ${isGm ? "grid-cols-2" : "grid-cols-1"}`}>
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase font-semibold">Quantity ({p.unit || "pcs"})</label>
+                    <input
+                      type="number" min="0" step={isGm ? "1" : "1"}
+                      placeholder={isGm ? "Enter grams" : "Enter quantity"}
+                      value={quickQty}
+                      onChange={e => {
+                        const v = e.target.value === "" ? "" : Number(e.target.value);
+                        setQuickQty(v);
+                        if (v !== "") setQuickAmount(parseFloat((Number(v) * p.price).toFixed(2)));
+                        else setQuickAmount("");
+                      }}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon"
+                    />
+                  </div>
+                  {isGm && (
+                    <div>
+                      <label className="text-[10px] text-gray-500 uppercase font-semibold">Amount (₹)</label>
+                      <input
+                        type="number" min="0" step="0.01"
+                        placeholder="Enter amount"
+                        value={quickAmount}
+                        onChange={e => {
+                          const v = e.target.value === "" ? "" : Number(e.target.value);
+                          setQuickAmount(v);
+                          if (v !== "") setQuickQty(parseFloat((Number(v) / p.price).toFixed(3)));
+                          else setQuickQty("");
+                        }}
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon"
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3 mb-4 flex justify-between items-center">
+                  <span className="text-xs text-gray-500">{isGm ? `${computedQty || 0} gm` : `${quickQty || 0} pcs`}</span>
+                  <span className="text-base font-bold text-maroon">₹{computedAmount || "0.00"}</span>
+                </div>
+                <button onClick={confirmQuickAdd} disabled={!quickQty && !quickAmount}
+                  className="w-full bg-maroon text-white font-bold py-3 rounded-lg hover:bg-maroon-light transition-colors uppercase tracking-wider text-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                  ADD TO BILL
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
+      </>)}
 
       {showWhatsAppModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">

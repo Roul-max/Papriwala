@@ -252,13 +252,15 @@ export default function AdminLayout() {
 
   if (isMobile) return <Navigate to="/" replace />;
 
-  const navItems = ALL_NAV_ITEMS.filter(item => item.module === null || canSee(item.module));
+  const isEmployee = role !== "Admin";
+  const navItems = isEmployee ? [] : ALL_NAV_ITEMS.filter(item => item.module === null || canSee(item.module));
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-screen w-full bg-cream">
 
-      {/* Sidebar */}
+      {/* Sidebar — hidden for employees */}
+      {!isEmployee && (
       <aside className="w-64 bg-maroon text-cream-light flex flex-col fixed h-full z-10">
         <div className="p-6 text-center border-b border-maroon-light select-none">
           <div className="w-20 h-20 rounded-full border-2 border-gold mx-auto mb-3 flex items-center justify-center bg-cream-light overflow-hidden">
@@ -292,87 +294,31 @@ export default function AdminLayout() {
           ))}
         </nav>
       </aside>
+      )}
 
       {/* Main area */}
-      <div className="flex-1 ml-64 flex flex-col h-full overflow-hidden">
+      <div className={`flex-1 ${!isEmployee ? "ml-64" : ""} flex flex-col h-full overflow-hidden`}>
 
         {/* Header */}
         <header
-          style={{ position: "fixed", top: 0, left: "256px", width: "calc(100vw - 256px)", zIndex: 9999 }}
+          style={{ position: "fixed", top: 0, left: isEmployee ? "0" : "256px", width: isEmployee ? "100vw" : "calc(100vw - 256px)", zIndex: 9999 }}
           className="h-16 bg-cream border-b border-gold/20 flex items-center justify-between px-6"
         >
-          <h2 className="font-serif text-2xl text-maroon font-semibold capitalize">
-            {location.pathname.split("/").pop()?.replace("-", " ") || "Dashboard"}
-          </h2>
+          <div className="flex items-center gap-3">
+            {isEmployee && (
+              <img src="/Logo.png" alt="Logo" className="w-9 h-9 object-contain" />
+            )}
+            <h2 className="font-serif text-2xl text-maroon font-semibold capitalize">
+              {isEmployee ? "POS Billing" : (location.pathname.split("/").pop()?.replace("-", " ") || "Dashboard")}
+            </h2>
+          </div>
 
           <div className="flex items-center gap-6">
 
-            {/* Omni-Search */}
-            <div className="relative" ref={searchRef}>
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-              <input
-                type="text"
-                placeholder="Omni-Search..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className={`pl-10 pr-4 py-2 rounded-full border bg-white text-sm focus:outline-none focus:border-gold w-64 ${isOffline ? "border-red-500" : "border-gray-300"}`}
-              />
-              {searchResults && (
-                <div className={`absolute top-full left-0 right-0 mt-2 bg-white rounded-md shadow-lg border max-h-[400px] overflow-y-auto z-50 ${isOffline ? "border-red-500" : "border-gray-100"}`}>
-                  <div className="p-3 text-sm">
-                    {isOffline && (
-                      <div className="text-red-500 text-xs text-center pb-2 border-b border-gray-100 mb-2">Network offline.</div>
-                    )}
-                    {searchBlocked && (
-                      <div className="flex items-center gap-2 text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 mb-2 text-xs font-semibold">
-                        🚫 Access denied — "{searchBlocked}" module is hidden for your role.
-                      </div>
-                    )}
-                    {searchResults.products.length === 0 && searchResults.dealers.length === 0 && searchResults.employees.length === 0 && (
-                      <div className="text-gray-500 text-center py-2">No matching records found.</div>
-                    )}
-                    {searchResults.products.length > 0 && (
-                      <div className="mb-2">
-                        <h4 className="font-semibold text-xs text-maroon uppercase mb-1">Products</h4>
-                        {searchResults.products.map(p => (
-                          <button key={p.id} onClick={() => goTo("/admin/inventory", "Inventory")}
-                            className="w-full text-left py-1.5 hover:bg-maroon/5 px-2 rounded flex items-center justify-between group">
-                            <span className="font-medium text-gray-800 group-hover:text-maroon">{p.name}</span>
-                            <span className="text-xs text-gray-400">{p.sku}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {searchResults.dealers.length > 0 && (
-                      <div className="mb-2">
-                        <h4 className="font-semibold text-xs text-maroon uppercase mb-1">Dealers</h4>
-                        {searchResults.dealers.map(d => (
-                          <button key={d.id} onClick={() => goTo("/admin/dealer", "Financial Reports")}
-                            className="w-full text-left py-1.5 hover:bg-maroon/5 px-2 rounded flex items-center justify-between group">
-                            <span className="font-medium text-gray-800 group-hover:text-maroon">{d.name}</span>
-                            <span className="text-xs text-gray-400">{d.gstin}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {searchResults.employees.length > 0 && (
-                      <div className="mb-2">
-                        <h4 className="font-semibold text-xs text-maroon uppercase mb-1">Employees</h4>
-                        {searchResults.employees.map(e => (
-                          <button key={e.id} onClick={() => goTo("/admin/employee", "Employees")}
-                            className="w-full text-left py-1.5 hover:bg-maroon/5 px-2 rounded flex items-center justify-between group">
-                            <span className="font-medium text-gray-800 group-hover:text-maroon">{e.name || e.full_name}</span>
-                            <span className="text-xs text-gray-400">{e.id}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
 
-            {/* Bell / Notifications */}
+
+            {/* Bell — admin only */}
+            {!isEmployee && (
             <div className="relative" ref={notifRef}>
               <button
                 onClick={handleBellClick}
@@ -413,8 +359,10 @@ export default function AdminLayout() {
                 </div>
               )}
             </div>
+            )}
 
-            {canSee("Settings") && (
+            {/* Settings — admin only */}
+            {!isEmployee && canSee("Settings") && (
               <Link to="/admin/settings" className="w-10 h-10 flex items-center justify-center text-maroon hover:text-gold transition-colors">
                 <Settings size={24} />
               </Link>
@@ -432,9 +380,11 @@ export default function AdminLayout() {
                 </div>
               </div>
               <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-gray-100 rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
-                <Link to="/admin/profile" className="block px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-maroon border-b border-gray-50 font-medium">
-                  Profile Settings
-                </Link>
+                {!isEmployee && (
+                  <Link to="/admin/profile" className="block px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-maroon border-b border-gray-50 font-medium">
+                    Profile Settings
+                  </Link>
+                )}
                 <button onClick={handleLogout} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 font-medium">
                   Logout
                 </button>

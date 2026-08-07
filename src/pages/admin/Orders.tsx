@@ -48,9 +48,6 @@ function paymentLabel(order: Order): string {
 }
 
 function printOrder(order: Order) {
-  const w = window.open("", "", "height=900,width=400");
-  if (!w) return;
-
   const dash = `<div style="text-align:center;font-size:10px;margin:4px 0">----------------------------------------</div>`;
   const dt   = order.timestamp ? new Date(order.timestamp).toLocaleString() : "—";
 
@@ -65,7 +62,7 @@ function printOrder(order: Order) {
     ? `<div style="display:flex;justify-content:space-between;font-size:10px"><span>Discount</span><span>-₹${Number(order.discount_applied).toFixed(2)}</span></div>`
     : "";
 
-  w.document.write(`<html><head><title>Order ${order.id}</title><style>
+  const html = `<html><head><style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Courier New',monospace;font-size:11px;width:300px;margin:0 auto;padding:10px 6px}
     @page{size:80mm auto;margin:0}
@@ -86,9 +83,19 @@ function printOrder(order: Order) {
     <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:bold"><span>Grand Total</span><span>₹${Number(order.grand_total).toFixed(2)}</span></div>
     ${dash}
     <div style="text-align:center;font-weight:bold;margin-top:4px">Thank You &amp; Visit Again!</div>
-  </body></html>`);
-  w.document.close();
-  setTimeout(() => { w.print(); w.close(); }, 400);
+  </body></html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) return;
+  doc.open(); doc.write(html); doc.close();
+  setTimeout(() => {
+    iframe.contentWindow?.focus();
+    iframe.contentWindow?.print();
+    setTimeout(() => document.body.removeChild(iframe), 1000);
+  }, 300);
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -212,7 +219,7 @@ export default function AdminOrders() {
       </div>
 
       {/* Orders List */}
-      <div className="space-y-4">
+      <div className="space-y-4 overflow-y-auto" style={{ maxHeight: "calc(7 * 120px)" }}>
         {filteredOrders.length === 0 ? (
           <div className="bg-white p-8 text-center text-gray-500 rounded-lg border border-gray-100">No orders found.</div>
         ) : filteredOrders.map(order => (
