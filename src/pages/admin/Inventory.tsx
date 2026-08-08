@@ -2,10 +2,10 @@ import React, { useState, useEffect } from "react";
 import { Package, AlertTriangle, XCircle, Search, Plus, X, Trash2, ArrowDownCircle, ArrowUpCircle, EyeOff, Edit2 } from "lucide-react";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
-type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; muted?: boolean; image?: string; unit?: string; };
+type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; muted?: boolean; image?: string; unit?: string; description?: string; };
 type LogEntry = { id: string; type: "STOCK_IN" | "STOCK_OUT"; product_name: string; qty: number; reason: string; operator: string; timestamp: string; };
 
-const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs", image: "" };
+const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs", image: "", description: "" };
 
 export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -220,7 +220,11 @@ export default function Inventory() {
                   </td>
                   <td className="py-3 px-4 text-gray-500">{p.category}</td>
                   <td className="py-3 px-4 font-mono text-xs">{p.sku}</td>
-                  <td className="py-3 px-4 font-bold">{p.current_stock_qty}</td>
+                  <td className="py-3 px-4 font-bold">
+                    {p.unit === "gm" && p.current_stock_qty >= 1000
+                      ? <>{(p.current_stock_qty / 1000).toFixed(2)} <span className="text-xs text-gray-400 font-normal">kg</span></>
+                      : <>{p.current_stock_qty} <span className="text-xs text-gray-400 font-normal">{p.unit || "pcs"}</span></>}
+                  </td>
                   <td className="py-3 px-4">
                     <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${p.current_stock_qty === 0 ? "bg-red-100 text-red-700" : p.current_stock_qty <= p.safety_low_threshold ? "bg-yellow-100 text-yellow-700" : "bg-green-100 text-green-700"}`}>
                       {p.current_stock_qty === 0 ? "Out of Stock" : p.current_stock_qty <= p.safety_low_threshold ? "Low Stock" : "In Stock"}
@@ -235,7 +239,7 @@ export default function Inventory() {
                     <div className="flex justify-end gap-1">
                       {!isReadOnly && (
                         <>
-                          <button onClick={() => { setEditProductId(p.id); setAddForm({ name: p.name, sku: p.sku, category: p.category, unit_purchase_cost: String(p.unit_purchase_cost), price: String(p.price), current_stock_qty: String(p.current_stock_qty), safety_low_threshold: String(p.safety_low_threshold), unit: p.unit || "pcs", image: p.image || "" }); setShowAddModal(true); }}
+                          <button onClick={() => { setEditProductId(p.id); setAddForm({ name: p.name, sku: p.sku, category: p.category, unit_purchase_cost: String(p.unit_purchase_cost), price: String(p.price), current_stock_qty: String(p.current_stock_qty), safety_low_threshold: String(p.safety_low_threshold), unit: p.unit || "pcs", image: p.image || "", description: p.description || "" }); setShowAddModal(true); }}
                             className="text-blue-600 hover:bg-blue-50 p-1.5 rounded" title="Edit"><Edit2 size={16} /></button>
                           <button onClick={() => { setStockModal({ product: p, type: "in" }); setStockQty(""); setStockReason(""); setStockError(""); }}
                             className="text-green-600 hover:bg-green-50 p-1.5 rounded" title="Stock In"><ArrowDownCircle size={16} /></button>
@@ -351,12 +355,28 @@ export default function Inventory() {
                 { label: "Safety Low Threshold", key: "safety_low_threshold", type: "number" },
               ].map(f => (
                 <div key={f.key}>
-                  <label className="text-xs font-semibold text-gray-600 uppercase">{f.label}</label>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">
+                    {f.key === "current_stock_qty"
+                      ? `Initial Quantity (${addForm.unit || "pcs"})`
+                      : f.key === "safety_low_threshold"
+                      ? `Safety Low Threshold (${addForm.unit || "pcs"})`
+                      : f.label}
+                  </label>
                   <input type={f.type} required value={(addForm as any)[f.key]}
                     onChange={e => setAddForm(prev => ({ ...prev, [f.key]: e.target.value }))}
                     className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
                 </div>
               ))}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Description (optional)</label>
+                <textarea
+                  value={(addForm as any).description}
+                  onChange={e => setAddForm(prev => ({ ...prev, description: e.target.value }))}
+                  rows={3}
+                  placeholder="Short product description for mobile app..."
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon resize-none"
+                />
+              </div>
               {addError && <p className="text-red-500 text-sm">{addError}</p>}
               <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">
                 {editProductId ? "Save Changes" : "Add Product"}

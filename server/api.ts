@@ -276,7 +276,7 @@ router.get("/products/:id", async (req, res) => {
 
 router.post("/products", async (req, res) => {
   const session = (req as any).session;
-  const { name, category, price, sku, unit, current_stock_qty, unit_purchase_cost, safety_low_threshold, image } = req.body;
+  const { name, category, price, sku, unit, current_stock_qty, unit_purchase_cost, safety_low_threshold, image, description } = req.body;
   if (!name || !category) return res.status(400).json({ error: "name and category are required" });
   const newProduct = {
     id: `PRD-${Date.now()}`,
@@ -286,6 +286,7 @@ router.post("/products", async (req, res) => {
     sku: sanitize(sku || ""),
     unit: sanitize(unit || "pcs"),
     image: sanitize(image || ""),
+    description: sanitize(description || ""),
     unit_purchase_cost: Number(unit_purchase_cost) || 0,
     safety_low_threshold: Number(safety_low_threshold) || 5,
     current_stock_qty: Number(current_stock_qty) || 0,
@@ -385,8 +386,8 @@ router.post("/orders", async (req, res) => {
   // ── Deduct stock for each item in the order ───────────────────────────────
   const products = await dbSelect("products", db.products);
   for (const item of (saved.items || [])) {
-    const qty = Number(item.qty) || 1;
-    // Match product by name (case-insensitive)
+    const qty = Number(item.qty);
+    if (!qty || qty <= 0) continue;
     const product = products.find((p: any) =>
       p.name?.toLowerCase() === item.name?.toLowerCase()
     );

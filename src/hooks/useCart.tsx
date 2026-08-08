@@ -8,6 +8,7 @@ type CartItem = {
   size: string;
   price: number;
   qty: number;
+  unit: string;
   image: string;
   note?: string;
 };
@@ -80,7 +81,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setItems(prev => {
       const existing = prev.find(i => i.id === cartItemId);
       if (existing) return prev.map(i => i.id === cartItemId ? { ...i, qty: i.qty + quantity } : i);
-      return [...prev, { id: cartItemId, product_id: product.id, name: product.name, size: size!, price: finalPrice, qty: quantity, image: product.image }];
+    return [...prev, { id: cartItemId, product_id: product.id, name: product.name, size: size!, price: finalPrice, qty: quantity, unit: product.unit || "pcs", image: product.image }];
     });
     showToast(product.name, product.image);
   };
@@ -101,6 +102,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         size: selectedSize,
         price: variant.price,
         qty: qty,
+        unit: selectedProduct.unit || "pcs",
         image: selectedProduct.image
       }];
     });

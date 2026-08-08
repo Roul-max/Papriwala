@@ -37,7 +37,7 @@ export default function Checkout() {
         order_source: "QR Table Menu",
         payment_method: method,
         customer_id: customerId,
-        items: items.map(i => ({ name: i.name, size: i.size, price: i.price, qty: i.qty, note: i.note || "" })),
+        items: items.map(i => ({ name: i.name, size: i.size, price: i.price, qty: i.qty, unit: i.unit || "pcs", note: i.note || "" })),
         tax_collected: (total / 1.05 * 0.05),
       })
     });

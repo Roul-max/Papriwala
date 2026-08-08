@@ -8,6 +8,8 @@ export default function ProductList() {
   const [products, setProducts] = useState<any[]>([]);
   const [categoryName, setCategoryName] = useState("");
   const [sortOption, setSortOption] = useState<string>("default");
+  const [qtys, setQtys] = useState<Record<string, number>>({});
+  const [gms, setGms] = useState<Record<string, string>>({});
   const { id } = useParams();
   const navigate = useNavigate();
   const { toggleWishlist, isInWishlist } = useWishlist();
@@ -90,11 +92,32 @@ export default function ProductList() {
             <div className="ml-4 flex flex-col justify-between py-1 flex-1">
               <Link to={`/product/${product.id}`}>
                 <h3 className="font-bold text-gray-800 pr-6 leading-tight">{product.name}</h3>
-                <p className="text-maroon font-semibold text-sm mt-1">₹{product.price} / kg</p>
+                <p className="text-maroon font-semibold text-sm mt-1">₹{product.price} / {product.unit === "gm" ? "gm" : "pc"}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{product.current_stock_qty} {product.unit === "gm" ? "gm left" : "pcs left"}</p>
               </Link>
-              <button onClick={() => addToCart(product)} className="self-end bg-maroon text-white text-xs font-bold px-4 py-1.5 rounded-full hover:bg-maroon-light">
-                Add
-              </button>
+              {product.unit === "gm" ? (
+                <div className="flex items-center gap-1 mt-2">
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="gm"
+                    value={gms[product.id] || ""}
+                    onChange={e => setGms(prev => ({ ...prev, [product.id]: e.target.value }))}
+                    className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:border-maroon"
+                  />
+                  <button
+                    onClick={() => { const g = Number(gms[product.id]); if (g > 0) { addToCart(product, "Regular", g); setGms(prev => ({ ...prev, [product.id]: "" })); } }}
+                    className="bg-maroon text-white text-xs font-bold px-3 py-1.5 rounded-full hover:bg-maroon-light"
+                  >Add</button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 mt-2">
+                  <button onClick={() => setQtys(prev => ({ ...prev, [product.id]: Math.max(1, (prev[product.id] || 1) - 1) }))} className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600 font-bold">-</button>
+                  <span className="w-6 text-center text-sm font-bold">{qtys[product.id] || 1}</span>
+                  <button onClick={() => setQtys(prev => ({ ...prev, [product.id]: (prev[product.id] || 1) + 1 }))} className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600 font-bold">+</button>
+                  <button onClick={() => { addToCart(product, undefined, qtys[product.id] || 1); setQtys(prev => ({ ...prev, [product.id]: 1 })); }} className="bg-maroon text-white text-xs font-bold px-3 py-1.5 rounded-full hover:bg-maroon-light ml-1">Add</button>
+                </div>
+              )}
             </div>
           </div>
         ))}

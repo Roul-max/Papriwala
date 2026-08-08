@@ -18,12 +18,7 @@ export { supabase };
 
 // ─── In-memory fallback store (used when Supabase is not configured) ─────────
 export const db: any = {
-  products: [
-    { id: "p1", name: "Kaju Katli", category: "Sweets", current_stock_qty: 25, unit_purchase_cost: 400, safety_low_threshold: 5, price: 520, image: "https://images.unsplash.com/photo-1626804475297-4160ebba5270?auto=format&fit=crop&q=80&w=200", sku: "SW-001", unit: "kg", description: "Premium cashew fudge made with pure desi ghee and finest kaju. A signature delicacy perfect for every celebration and gifting." },
-    { id: "p2", name: "Motichoor Ladoo", category: "Sweets", current_stock_qty: 40, unit_purchase_cost: 150, safety_low_threshold: 10, price: 200, image: "https://images.unsplash.com/photo-1634563450917-fa254dfb2344?auto=format&fit=crop&q=80&w=200", sku: "SW-002", unit: "kg", description: "Soft, melt-in-mouth ladoos made from fine boondi, sugar syrup, and cardamom. A festive favourite across generations." },
-    { id: "p3", name: "Soan Papdi", category: "Sweets", current_stock_qty: 15, unit_purchase_cost: 180, safety_low_threshold: 10, price: 250, image: "https://images.unsplash.com/photo-1559564104-e3c79a528c0b?auto=format&fit=crop&q=80&w=200", sku: "SW-003", unit: "kg", description: "Light, flaky and melt-in-the-mouth — our signature Soan Papdi is handcrafted with pure ghee, gram flour, sugar and cardamom." },
-    { id: "p4", name: "Aloo Bhujia", category: "Namkeen", current_stock_qty: 100, unit_purchase_cost: 80, safety_low_threshold: 20, price: 120, image: "https://images.unsplash.com/photo-1605337298642-e931139edaf1?auto=format&fit=crop&q=80&w=200", sku: "NM-001", unit: "kg", description: "Crispy, spiced potato noodles — a classic Bihari namkeen snack enjoyed with tea or as an anytime munch." },
-  ],
+  products: [],
   product_variants: [
     { variant_id: "v1", product_id: "p1", size_label: "250g", variant_price_modifier: 0.25 },
     { variant_id: "v2", product_id: "p1", size_label: "500g", variant_price_modifier: 0.5 },

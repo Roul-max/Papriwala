@@ -295,43 +295,33 @@ export default function POS() {
     const now = new Date();
     const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getFullYear()).slice(-2)}`;
     const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
-    const dash = "-".repeat(32);
-    const pageW = 226.77;
     Object.entries(categoryMap).forEach(([category, items], idx) => {
       setTimeout(() => {
-        const doc = new jsPDF({ unit: "pt", format: [pageW, 600] });
-        const cx = pageW / 2;
-        const lx = 10, rx = pageW - 10;
-        let y = 16;
-        const line = (txt: string, size: number, bold = false, align: "center"|"left"|"right" = "center", x = cx) => {
-          doc.setFont("courier", bold ? "bold" : "normal");
-          doc.setFontSize(size);
-          doc.text(txt, x, y, { align });
-          y += size * 1.5;
-        };
-        const divider = () => { line(dash, 7); };
-        line("** KITCHEN / COUNTER SLIP **", 11, true);
-        line(`${category.toUpperCase()} COUNTER`, 10, true);
-        divider();
-        doc.setFont("courier", "normal"); doc.setFontSize(7);
-        doc.text(`Bill No: ${billNo.slice(-5)}`, lx, y);
-        doc.text(`${dateStr} ${timeStr}`, rx, y, { align: "right" });
-        y += 10;
-        divider();
-        doc.setFont("courier", "bold"); doc.setFontSize(7);
-        doc.text("Item", lx, y); doc.text("Qty", rx, y, { align: "right" }); y += 10;
-        divider();
-        doc.setFont("courier", "normal"); doc.setFontSize(7);
-        items.forEach((item: any) => {
+        const itemsHtml = items.map((item: any) => {
           const name = (item.name + (item.size ? ` (${item.size})` : "")).slice(0, 28);
-          doc.text(name, lx, y);
-          doc.text(`x${item.qty}`, rx, y, { align: "right" });
-          y += 10;
-        });
-        divider();
-        line(`Total Items: ${items.reduce((s: number, i: any) => s + i.qty, 0)}`, 7);
-        doc.save(`slip-${category}-${billNo.slice(-5)}.pdf`);
-      }, idx * 300);
+          return `<div class="row"><span>${name}</span><span>x${item.qty}</span></div>`;
+        }).join("");
+        printViaIframe(`<html><head><style>
+          *{margin:0;padding:0;box-sizing:border-box}
+          body{font-family:'Courier New',Courier,monospace;font-size:11px;color:#000;background:#fff;width:300px;margin:0 auto;padding:10px 6px}
+          .center{text-align:center}.bold{font-weight:bold}
+          .title{font-size:14px;font-weight:bold;text-align:center}
+          .div{text-align:center;font-size:10px;margin:4px 0}
+          .row{display:flex;justify-content:space-between;font-size:10px;margin:2px 0}
+          @page{size:80mm auto;margin:0}@media print{body{width:80mm;margin:0 auto}}
+        </style></head><body>
+          <div class="title">** KITCHEN / COUNTER SLIP **</div>
+          <div class="title" style="font-size:12px;margin-top:2px">${category.toUpperCase()} COUNTER</div>
+          <div class="div">--------------------------------</div>
+          <div class="row"><span>Bill No: ${billNo.slice(-5)}</span><span>${dateStr} ${timeStr}</span></div>
+          <div class="div">--------------------------------</div>
+          <div class="row bold"><span><b>Item</b></span><span><b>Qty</b></span></div>
+          <div class="div">--------------------------------</div>
+          ${itemsHtml}
+          <div class="div">--------------------------------</div>
+          <div class="center">Total Items: ${items.reduce((s: number, i: any) => s + i.qty, 0)}</div>
+        </body></html>`);
+      }, idx * 400);
     });
   };
 
@@ -411,7 +401,7 @@ export default function POS() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: paymentMode, items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, created_by: createdBy })
     });
-    handleExportPDF();       // main bill — downloads PDF directly
+    handlePrint();          // main bill for client
     printSubBills(invoiceNo); // sub bills per category for staff
     setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
     generateInvoiceNo();
@@ -507,8 +497,8 @@ export default function POS() {
                     <td className="py-3 px-4 font-medium text-gray-800">{p.name}</td>
                     <td className="py-3 px-4 font-mono text-xs text-gray-500">{p.sku || "—"}</td>
                     <td className="py-3 px-4 text-gray-500">{p.category}</td>
-                    <td className="py-3 px-4">{p.current_stock_qty}</td>
-                    <td className="py-3 px-4">₹{p.price}</td>
+                    <td className="py-3 px-4">{p.unit === "gm" ? (p.current_stock_qty / 1000).toFixed(2) : p.current_stock_qty} <span className="text-xs text-gray-400">{p.unit === "gm" ? "kg" : (p.unit || "pcs")}</span></td>
+                    <td className="py-3 px-4">₹{p.unit === "gm" ? (p.price * 1000).toFixed(0) : p.price}<span className="text-xs text-gray-400">/{p.unit === "gm" ? "kg" : (p.unit || "pc")}</span></td>
                     <td className="py-3 px-4">
                       <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${p.current_stock_qty > p.safety_low_threshold ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
                         {p.current_stock_qty > p.safety_low_threshold ? "In Stock" : "Low Stock"}

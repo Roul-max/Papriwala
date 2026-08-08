@@ -9,6 +9,7 @@ export default function ProductDetail() {
   const navigate = useNavigate();
   const [product, setProduct] = useState<any>(null);
   const [qty, setQty] = useState(1);
+  const [gmInput, setGmInput] = useState("");
   const [variants, setVariants] = useState<any[]>([]);
   const [selectedSize, setSelectedSize] = useState("");
   const { toggleWishlist, isInWishlist } = useWishlist();
@@ -35,28 +36,34 @@ export default function ProductDetail() {
     return v ? product.price * v.variant_price_modifier : product.price;
   };
 
+  const isGm = product?.unit === "gm";
+
   const handleAddToCart = () => {
     const size = selectedSize || "Regular";
     const variantData = variants.find(v => v.size_label === size);
     const finalPrice = variantData ? product.price * variantData.variant_price_modifier : product.price;
-    addToCart({ ...product, price: finalPrice }, size, qty);
+    if (isGm) {
+      const grams = Number(gmInput);
+      if (!grams || grams <= 0) return;
+      addToCart({ ...product, price: finalPrice }, size, grams);
+    } else {
+      addToCart({ ...product, price: finalPrice }, size, qty);
+    }
     navigate("/cart");
   };
 
   return (
-    <div className="flex flex-col min-h-full bg-white pb-40">
+    <div className="relative flex flex-col min-h-full bg-white pb-40">
       {/* Header */}
       <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-10">
         <button onClick={() => navigate(-1)} className="w-10 h-10 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center text-maroon shadow-sm">
           <ChevronLeft size={24} />
         </button>
-        <button onClick={() => navigate("/cart")} className="w-10 h-10 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center text-maroon shadow-sm">
-          <ShoppingBag size={20} />
-        </button>
+
       </div>
 
       {/* Image */}
-      <div className="w-full h-72 bg-amber-50">
+      <div className="w-full h-96 bg-amber-50">
         {product.image
           ? <img src={product.image} alt={product.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).src = "/cover.png"; }} />
           : <img src="/cover.png" alt={product.name} className="w-full h-full object-cover" />}
@@ -73,10 +80,13 @@ export default function ProductDetail() {
             <Heart size={28} fill={isInWishlist(product.id) ? 'currentColor' : 'none'} />
           </button>
         </div>
-        <p className="text-gold font-bold text-xl mb-4">₹{getPrice().toFixed(2)} <span className="text-sm font-normal text-gray-500">/ unit</span></p>
+        <p className="text-gold font-bold text-xl mb-1">₹{getPrice().toFixed(2)} <span className="text-sm font-normal text-gray-500">/ gm</span></p>
+        <p className="text-xs text-gray-400 mb-4">{product.current_stock_qty} {isGm ? "gm left" : "pcs left"}</p>
 
-        {product.description && (
+        {product.description ? (
           <p className="text-gray-500 text-sm leading-relaxed mb-6">{product.description}</p>
+        ) : (
+          <p className="text-gray-400 text-sm leading-relaxed mb-6 italic">Fresh and handcrafted with finest ingredients. A signature delicacy from Shri Badrinarayan Papriwale.</p>
         )}
 
         {/* Variant Size Selection — only if variants exist */}
@@ -99,14 +109,34 @@ export default function ProductDetail() {
           </div>
         )}
 
-        {/* Qty Stepper */}
-        <div className="flex items-center justify-center mb-4">
-          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-full px-2 py-1">
-            <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-10 h-10 flex items-center justify-center text-gray-600 hover:bg-gray-200 rounded-full font-bold text-xl">-</button>
-            <span className="w-12 text-center font-bold text-lg">{qty}</span>
-            <button onClick={() => setQty(qty + 1)} className="w-10 h-10 flex items-center justify-center text-gray-600 hover:bg-gray-200 rounded-full font-bold text-xl">+</button>
+        {/* Qty / Gm Input */}
+        {isGm ? (
+          <div className="mb-4">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-2">Enter Quantity (gm)</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min="1"
+                placeholder="e.g. 250"
+                value={gmInput}
+                onChange={e => setGmInput(e.target.value)}
+                className="flex-1 border-2 border-gray-200 focus:border-maroon rounded-xl px-4 py-3 text-lg font-bold text-center focus:outline-none"
+              />
+              <span className="text-gray-500 font-semibold">gm</span>
+            </div>
+            {gmInput && Number(gmInput) > 0 && (
+              <p className="text-center text-maroon font-bold mt-2">Total: ₹{(getPrice() * Number(gmInput)).toFixed(2)}</p>
+            )}
           </div>
-        </div>
+        ) : (
+          <div className="flex items-center justify-center mb-4">
+            <div className="flex items-center bg-gray-50 border border-gray-200 rounded-full px-2 py-1">
+              <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-10 h-10 flex items-center justify-center text-gray-600 hover:bg-gray-200 rounded-full font-bold text-xl">-</button>
+              <span className="w-12 text-center font-bold text-lg">{qty}</span>
+              <button onClick={() => setQty(qty + 1)} className="w-10 h-10 flex items-center justify-center text-gray-600 hover:bg-gray-200 rounded-full font-bold text-xl">+</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Sticky Bottom Bar */}
