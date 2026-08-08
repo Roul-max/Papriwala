@@ -228,11 +228,14 @@ export default function POS() {
     // Items
     doc.setFont("courier", "normal"); doc.setFontSize(7);
     cart.forEach(item => {
+      const isGm = (item.unit || "").toLowerCase() === "gm";
+      const displayQty = isGm ? `${(item.qty / 1000).toFixed(3)}kg` : String(item.qty);
+      const displayRate = isGm ? (item.price * 1000).toFixed(2) : item.price.toFixed(2);
       const name = (item.name + (item.size ? ` (${item.size})` : "")).slice(0, 22);
       const amt = (item.price * item.qty).toFixed(2);
       doc.text(name, lx, y);
-      doc.text(String(item.qty), 130, y, { align: "right" });
-      doc.text(item.price.toFixed(2), 168, y, { align: "right" });
+      doc.text(displayQty, 130, y, { align: "right" });
+      doc.text(displayRate, 168, y, { align: "right" });
       doc.text(amt, rx, y, { align: "right" });
       y += 10;
     });
@@ -336,8 +339,11 @@ export default function POS() {
     const discountRow = discountTotal > 0 ? `<div class="row"><span>Discount</span><span>-&#8377;${discountTotal.toFixed(2)}</span></div>` : "";
     const otherRow = otherCharges > 0 ? `<div class="row"><span>Other Charges</span><span>&#8377;${otherCharges.toFixed(2)}</span></div>` : "";
     const itemsHtml = cart.map((item: any) => {
+      const isGm = (item.unit || "").toLowerCase() === "gm";
+      const displayQty = isGm ? (item.qty >= 1000 ? `${(item.qty / 1000).toFixed(3)}kg` : `${item.qty}gm`) : String(item.qty);
+      const displayRate = isGm ? (item.qty >= 1000 ? (item.price * 1000).toFixed(2) : item.price.toFixed(2)) : item.price.toFixed(2);
       const name = (item.name + (item.size ? ` (${item.size})` : "")).slice(0, 24);
-      return `<div class="item-row"><span class="iname">${name}</span><span class="iqty">${item.qty}</span><span class="irate">${item.price.toFixed(2)}</span><span class="iamt">${(item.price*item.qty).toFixed(2)}</span></div>`;
+      return `<div class="item-row"><span class="iname">${name}</span><span class="iqty">${displayQty}</span><span class="irate">${displayRate}</span><span class="iamt">${(item.price*item.qty).toFixed(2)}</span></div>`;
     }).join("");
     printViaIframe(`<html><head><style>
       *{margin:0;padding:0;box-sizing:border-box}
@@ -349,7 +355,7 @@ export default function POS() {
       .row{display:flex;justify-content:space-between;font-size:10px;margin:1px 0}
       .col-header{display:flex;justify-content:space-between;font-weight:bold;font-size:10px;margin:2px 0}
       .item-row{display:flex;font-size:10px;margin:2px 0}
-      .iname{flex:2;overflow:hidden}.iqty{flex:0.5;text-align:right}.irate{flex:0.8;text-align:right}.iamt{flex:0.8;text-align:right}
+      .iname{flex:2;overflow:hidden}.iqty{flex:0.8;text-align:right}.irate{flex:0.9;text-align:right}.iamt{flex:0.8;text-align:right}
       .grand{display:flex;justify-content:space-between;font-size:14px;font-weight:bold;margin:4px 0}
       @page{size:80mm auto;margin:0}@media print{body{width:80mm;margin:0 auto}}
     </style></head><body>
@@ -367,7 +373,7 @@ export default function POS() {
       <div class="row"><span>Payment: ${paymentMode}</span></div>
       <div class="row"><span>Name: ___________________________</span></div>
       ${dash}
-      <div class="col-header"><span style="flex:2">Item</span><span style="flex:0.5;text-align:right">Qty</span><span style="flex:0.8;text-align:right">Rate</span><span style="flex:0.8;text-align:right">Amt</span></div>
+      <div class="col-header"><span style="flex:2">Item</span><span style="flex:0.8;text-align:right">Qty</span><span style="flex:0.9;text-align:right">Rate</span><span style="flex:0.8;text-align:right">Amt</span></div>
       ${dash}
       ${itemsHtml}
       ${dash}
@@ -552,10 +558,12 @@ export default function POS() {
                         <p className="font-semibold text-gray-800 text-xs leading-tight">{item.name}</p>
                         {item.size && <p className="text-[10px] text-gray-400 mt-0.5">{item.size}</p>}
                       </td>
-                      <td className="px-1 py-2 text-center text-xs text-gray-500 font-semibold">{item.unit || "pcs"}</td>
-                      <td className="px-1 py-2 text-center text-xs text-gray-700 font-semibold">₹{item.price}</td>
+                      <td className="px-1 py-2 text-center text-xs text-gray-500 font-semibold">{item.unit === "gm" ? (item.qty >= 1000 ? "kg" : "gm") : (item.unit || "pcs")}</td>
+                      <td className="px-1 py-2 text-center text-xs text-gray-700 font-semibold">{item.unit === "gm" ? (item.qty >= 1000 ? `₹${(item.price * 1000).toFixed(0)}` : `₹${item.price}`) : `₹${item.price}`}</td>
                       <td className="px-1 py-2">
-                        <input type="number" min="0.01" step="0.01" value={item.qty} onChange={e => updateCartQty(item.id, Number(e.target.value))}
+                        <input type="number" min="0.01" step="0.01"
+                          value={item.unit === "gm" ? (item.qty >= 1000 ? parseFloat((item.qty / 1000).toFixed(3)) : item.qty) : item.qty}
+                          onChange={e => updateCartQty(item.id, item.unit === "gm" && item.qty >= 1000 ? Number(e.target.value) * 1000 : Number(e.target.value))}
                           className="w-full border border-gray-300 rounded px-1 py-1 text-xs text-center focus:border-maroon focus:outline-none" />
                       </td>
                       <td className="px-2 py-2 text-right font-bold text-maroon text-xs whitespace-nowrap">₹{(item.price * item.qty).toFixed(2)}</td>
@@ -723,7 +731,7 @@ export default function POS() {
                 <p className="font-semibold text-gray-800 mb-1">{p.name}</p>
                 <div className="flex gap-3 mb-4">
                   <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded font-semibold select-none">{p.unit || "pcs"}</span>
-                  <span className="text-xs bg-maroon/10 text-maroon px-2 py-1 rounded font-semibold select-none">₹{p.price} / {p.unit || "pcs"}</span>
+                  <span className="text-xs bg-maroon/10 text-maroon px-2 py-1 rounded font-semibold select-none">₹{isGm ? (p.price * 1000).toFixed(0) : p.price} / {isGm ? "kg" : (p.unit || "pcs")}</span>
                 </div>
                 <div className={`grid gap-3 mb-4 ${isGm ? "grid-cols-2" : "grid-cols-1"}`}>
                   <div>
