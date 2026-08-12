@@ -50,6 +50,15 @@ function RequireAuth({ children }: { children: React.ReactElement }) {
   return role ? children : <Navigate to="/admin/login" replace />;
 }
 
+function RequireMobileAuth({ children }: { children: React.ReactElement }) {
+  const token = localStorage.getItem("customerToken");
+  const isGuest = localStorage.getItem("guestBrowse") === "true";
+  if (token || isGuest) return children;
+  // On desktop, redirect to admin login instead of mobile splash
+  if (window.innerWidth >= 768) return <Navigate to="/admin/login" replace />;
+  return <Navigate to="/login" replace />;
+}
+
 // Redirects to the first accessible page based on role permissions
 function RoleHomeRedirect() {
   const role = localStorage.getItem("adminRole") || "";
@@ -121,7 +130,8 @@ export default function App() {
 
         {/* Mobile Portal Routes */}
         <Route path="/login" element={<SplashLogin />} />
-        <Route path="/" element={<CartProvider><MobileLayout /></CartProvider>}>
+        <Route path="/" element={<RequireMobileAuth><CartProvider><MobileLayout /></CartProvider></RequireMobileAuth>}>
+          <Route index element={<Home />} />
           <Route index element={<Home />} />
           <Route path="categories" element={<Categories />} />
           <Route path="category/:id" element={<ProductList />} />

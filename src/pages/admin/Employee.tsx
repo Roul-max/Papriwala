@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Calendar, Trash2, X, Lock, Clock, Printer } from "lucide-react";
+import { Search, Plus, Calendar, Trash2, X, Lock, Clock, Printer, Eye, EyeOff, Pencil } from "lucide-react";
 import { apiFetch } from "../../lib/apiFetch";
 
 const today = new Date().toISOString().split("T")[0];
@@ -21,7 +21,7 @@ export default function AdminEmployee() {
   const [tab, setTab] = useState("directory");
   const [employees, setEmployees] = useState<any[]>([]);
   const [search, setSearch] = useState("");
-  const [roles, setRoles] = useState<string[]>(["Cashier", "Chef", "Manager"]);
+  const [roles, setRoles] = useState<string[]>([]);
   const [loginSessions, setLoginSessions] = useState<any[]>([]);
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -36,6 +36,12 @@ export default function AdminEmployee() {
   const [reportEmp, setReportEmp] = useState("");
   const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
   const [reportData, setReportData] = useState<any[]>([]);
+
+  const [showPhoneMap, setShowPhoneMap] = useState<Record<string, boolean>>({});
+  const togglePhone = (id: string) => setShowPhoneMap(prev => ({ ...prev, [id]: !prev[id] }));
+  const [createdCreds, setCreatedCreds] = useState<{ login_id: string; login_password: string; name: string } | null>(null);
+  const [editEmp, setEditEmp] = useState<any | null>(null);
+  const [editError, setEditError] = useState("");
 
   const fetchEmployees = () =>
     apiFetch("/api/employees").then(r => r.json()).then(d => setEmployees(Array.isArray(d) ? d : []));
@@ -79,13 +85,15 @@ export default function AdminEmployee() {
     if (!addForm.designation_tag) { setAddError("Please select a designation."); return; }
     if (!addForm.base_compensation_rate || Number(addForm.base_compensation_rate) <= 0) { setAddError("Enter a valid compensation rate."); return; }
     if (addForm.last_working_date && addForm.last_working_date <= addForm.joining_date) { setAddError("Last working date must be after joining date."); return; }
-    await apiFetch("/api/employees", {
+    const res = await apiFetch("/api/employees", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...addForm, name: addForm.full_name, base_compensation_rate: Number(addForm.base_compensation_rate) })
     });
+    const data = await res.json();
     setShowAddModal(false);
     setAddForm({ ...EMPTY_EMP });
     fetchEmployees();
+    if (data.login_id) setCreatedCreds({ login_id: data.login_id, login_password: data.login_password, name: data.full_name || data.name });
   };
 
   const handleDeleteEmployee = async (id: string) => {
@@ -160,7 +168,9 @@ export default function AdminEmployee() {
                     <th className="py-3 px-4">Emp ID</th>
                     <th className="py-3 px-4">Full Name</th>
                     <th className="py-3 px-4">Designation</th>
-                    <th className="py-3 px-4">Phone</th>
+                    <th className="py-3 px-4">Login ID</th>
+                    <th className="py-3 px-4">Password</th>
+
                     <th className="py-3 px-4">Salary Type</th>
                     <th className="py-3 px-4">Rate (₹)</th>
                     <th className="py-3 px-4">Joined Date</th>
@@ -174,12 +184,23 @@ export default function AdminEmployee() {
                       <td className="py-3 px-4 font-mono text-xs">{emp.id}</td>
                       <td className="py-3 px-4 font-bold text-gray-800">{emp.full_name || emp.name}</td>
                       <td className="py-3 px-4"><span className="bg-gray-100 px-2 py-1 rounded text-xs">{emp.designation_tag}</span></td>
-                      <td className="py-3 px-4">{emp.phone_number}</td>
+                      <td className="py-3 px-4 font-mono text-xs font-bold text-maroon">
+                        {showPhoneMap[emp.id] ? (emp.login_id || "—") : "••••••"}
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs">{showPhoneMap[emp.id] ? (emp.login_password || "—") : "••••••••••"}</span>
+                          <button onClick={() => togglePhone(emp.id)} className="text-gray-400 hover:text-maroon">
+                            {showPhoneMap[emp.id] ? <EyeOff size={13} /> : <Eye size={13} />}
+                          </button>
+                        </div>
+                      </td>
                       <td className="py-3 px-4">{emp.salary_type_flag}</td>
                       <td className="py-3 px-4 font-medium">{emp.base_compensation_rate}</td>
                       <td className="py-3 px-4 text-gray-500">{emp.joining_date}</td>
                       <td className="py-3 px-4 text-xs font-semibold text-maroon">{getNextSalaryDate(emp.joining_date, emp.salary_type_flag)}</td>
-                      <td className="py-3 px-4 text-right">
+                      <td className="py-3 px-4 text-right flex items-center justify-end gap-1">
+                        <button onClick={() => { setEditEmp({ ...emp, full_name: emp.full_name || emp.name || "" }); setEditError(""); }} className="text-maroon hover:bg-maroon/10 p-1.5 rounded" title="Edit Employee"><Pencil size={16} /></button>
                         <button onClick={() => handleDeleteEmployee(emp.id)} className="text-red-600 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16} /></button>
                       </td>
                     </tr>
@@ -348,7 +369,7 @@ export default function AdminEmployee() {
 
       {/* Add Employee Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
+        <div className="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl sticky top-0">
               <h3 className="font-bold text-maroon text-lg">Add Employee</h3>
@@ -400,6 +421,122 @@ export default function AdminEmployee() {
               {addError && <p className="text-red-500 text-sm">{addError}</p>}
               <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">Add Employee</button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Employee Modal */}
+      {editEmp && (
+        <div className="fixed inset-0 bg-black/60 z-[10001] flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl sticky top-0">
+              <h3 className="font-bold text-maroon text-lg">Edit Employee</h3>
+              <button onClick={() => setEditEmp(null)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Full Name</label>
+                <input type="text" value={editEmp.full_name} onChange={e => setEditEmp((p: any) => ({ ...p, full_name: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Designation</label>
+                <select value={editEmp.designation_tag} onChange={e => setEditEmp((p: any) => ({ ...p, designation_tag: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
+                  {roles.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Phone</label>
+                <input type="text" maxLength={10} value={editEmp.phone_number || ""} onChange={e => setEditEmp((p: any) => ({ ...p, phone_number: e.target.value.replace(/\D/g, "") }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Salary Type</label>
+                <select value={editEmp.salary_type_flag} onChange={e => setEditEmp((p: any) => ({ ...p, salary_type_flag: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
+                  <option value="Monthly">Monthly</option>
+                  <option value="Daily">Daily</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Base Compensation Rate (₹)</label>
+                <input type="number" min="0" step="0.01" value={editEmp.base_compensation_rate || ""} onChange={e => setEditEmp((p: any) => ({ ...p, base_compensation_rate: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Joining Date</label>
+                <input type="date" value={editEmp.joining_date || ""} onChange={e => setEditEmp((p: any) => ({ ...p, joining_date: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Last Working Date <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input type="date" value={editEmp.last_working_date || ""} onChange={e => setEditEmp((p: any) => ({ ...p, last_working_date: e.target.value || null }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <div className="border-t border-gray-100 pt-3">
+                <label className="text-xs font-semibold text-gray-600 uppercase">Login ID</label>
+                <input type="text" value={editEmp.login_id || ""} onChange={e => setEditEmp((p: any) => ({ ...p, login_id: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon font-mono" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Password</label>
+                <input type="text" value={editEmp.login_password || ""} onChange={e => setEditEmp((p: any) => ({ ...p, login_password: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon font-mono" />
+              </div>
+              {editError && <p className="text-red-500 text-sm">{editError}</p>}
+              <button onClick={async () => {
+                if (!editEmp.full_name.trim()) { setEditError("Full name is required."); return; }
+                if (editEmp.phone_number && !/^\d{10}$/.test(editEmp.phone_number)) { setEditError("Phone must be 10 digits."); return; }
+                if (!editEmp.login_id?.trim() || !editEmp.login_password?.trim()) { setEditError("Login ID and Password are required."); return; }
+                const res = await apiFetch(`/api/employees/${editEmp.id}`, {
+                  method: "PATCH", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    name: editEmp.full_name.trim(),
+                    full_name: editEmp.full_name.trim(),
+                    designation_tag: editEmp.designation_tag,
+                    phone_number: editEmp.phone_number || null,
+                    salary_type_flag: editEmp.salary_type_flag,
+                    base_compensation_rate: Number(editEmp.base_compensation_rate),
+                    joining_date: editEmp.joining_date,
+                    last_working_date: editEmp.last_working_date || null,
+                    login_id: editEmp.login_id.trim(),
+                    login_password: editEmp.login_password.trim(),
+                  })
+                });
+                if (!res.ok) { setEditError("Failed to update. Try again."); return; }
+                const updated = await res.json();
+                setEmployees(prev => prev.map(e => e.id === editEmp.id ? { ...e, ...updated } : e));
+                setEditEmp(null);
+              }} className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">Save Changes</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credentials Modal — shown once after employee creation */}
+      {createdCreds && (
+        <div className="fixed inset-0 bg-black/60 z-[10001] flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="bg-maroon px-6 py-4 flex items-center justify-between">
+              <h3 className="font-serif text-lg font-bold text-white">Employee Credentials</h3>
+              <button onClick={() => setCreatedCreds(null)} className="text-white/70 hover:text-white"><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-500">Share these login credentials with <span className="font-bold text-gray-800">{createdCreds.name}</span>. Save them now — the password won't be shown again.</p>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-gray-500 uppercase font-semibold">Login ID</span>
+                  <span className="font-mono font-bold text-maroon text-lg">{createdCreds.login_id}</span>
+                </div>
+                <div className="flex justify-between items-center border-t border-gray-200 pt-3">
+                  <span className="text-xs text-gray-500 uppercase font-semibold">Password</span>
+                  <span className="font-mono font-bold text-gray-800 text-lg">{createdCreds.login_password}</span>
+                </div>
+              </div>
+              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">⚠ Note these credentials before closing. The employee uses Login ID as username and this password to log in.</p>
+              <button onClick={() => setCreatedCreds(null)} className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors">Done</button>
+            </div>
           </div>
         </div>
       )}

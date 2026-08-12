@@ -1,10 +1,14 @@
-import { Component, ReactNode } from "react";
+// @ts-nocheck
+import React from "react";
 
-interface Props { children: ReactNode; label?: string; }
+interface Props { children: React.ReactNode; label?: string; }
 interface State { hasError: boolean; message: string; }
 
-export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, message: "" };
+export default class ErrorBoundary extends React.Component<Props, State> {
+  constructor(props: Props) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
 
   static getDerivedStateFromError(err: Error): State {
     return { hasError: true, message: err.message };

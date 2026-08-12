@@ -13,6 +13,8 @@ export default function Profile() {
   const [tempName, setTempName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const isGuest = localStorage.getItem("guestBrowse") === "true" && !localStorage.getItem("customerToken");
+
   // Determine session type once on mount
   const isCustomer = !!localStorage.getItem("customerRole");
   const isAdmin    = !isCustomer && !!localStorage.getItem("adminRole");
@@ -118,10 +120,16 @@ export default function Profile() {
   };
 
   const handleLogout = () => {
-    if (isCustomer) {
+    if (isGuest) {
+      localStorage.removeItem("guestBrowse");
+      localStorage.removeItem("customerName");
+      navigate("/login");
+      return;
+    }
+    if (isCustomer || localStorage.getItem("guestBrowse") === "true") {
       const token = localStorage.getItem("customerToken") || "";
       if (token) fetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token, "X-User-Role": "Customer" } }).catch(() => {});
-      ["customerRole","customerName","customerToken","customerId","customerAvatar","employeePhone","isNewCustomer","orderHistory"].forEach(k => localStorage.removeItem(k));
+      ["customerRole","customerName","customerToken","customerId","customerAvatar","employeePhone","isNewCustomer","orderHistory","guestBrowse"].forEach(k => localStorage.removeItem(k));
       sessionStorage.clear();
       window.dispatchEvent(new Event("customerProfileUpdated"));
       navigate("/login");
@@ -135,6 +143,7 @@ export default function Profile() {
   };
 
   const roleBadge = () => {
+    if (isGuest) return <span className="bg-gray-100 text-gray-600 text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">Guest</span>;
     if (isCustomer) {
       if (isNewCustomer) return <span className="bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">🎉 New Customer</span>;
       return <span className="bg-maroon/10 text-maroon text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">Returning Customer</span>;
@@ -195,7 +204,7 @@ export default function Profile() {
 
           <button onClick={handleLogout}
             className="w-full bg-red-50 text-red-600 font-bold py-3 rounded-xl hover:bg-red-100 transition-colors border border-red-100 flex items-center justify-center gap-2 mt-2">
-            <LogOut size={20} /> Logout
+            <LogOut size={20} /> {isGuest ? "Sign In with Phone" : "Logout"}
           </button>
         </div>
 

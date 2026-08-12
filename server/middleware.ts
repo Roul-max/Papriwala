@@ -11,7 +11,7 @@ export interface Session {
   createdAt: number;
 }
 
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // In-memory fallback (used only when Supabase is unavailable)
 export const sessionStore = new Map<string, Session>();
@@ -50,7 +50,11 @@ export async function getSession(token: string): Promise<Session | null> {
       if (supabase) try { await supabase.from("sessions").delete().eq("token", token); } catch {}
       return null;
     }
+    // Sliding window — refresh both memory and Supabase expires_at
     mem.createdAt = Date.now();
+    if (supabase) try {
+      await supabase.from("sessions").update({ expires_at: new Date(Date.now() + SESSION_TTL_MS).toISOString() }).eq("token", token);
+    } catch {}
     return mem;
   }
   // Fallback: check Supabase (handles server restarts)

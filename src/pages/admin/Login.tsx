@@ -141,13 +141,13 @@ export default function AdminLogin() {
           <div className="flex bg-[#f5f0e8] p-1 rounded-md mb-8">
             <button
               className={`flex-1 py-2 rounded-sm text-sm font-semibold transition-colors ${role === "Admin" ? "bg-maroon shadow text-white" : "bg-[#fffdf7] text-maroon/60 hover:text-maroon"}`}
-              onClick={() => { setRole("Admin"); setError(""); }}
+              onClick={() => { setRole("Admin"); setError(""); setShowPass(false); }}
             >
               Admin
             </button>
             <button
               className={`flex-1 py-2 rounded-sm text-sm font-semibold transition-colors ${role === "Employee" ? "bg-maroon shadow text-white" : "bg-[#fffdf7] text-maroon/60 hover:text-maroon"}`}
-              onClick={() => { setRole("Employee"); setError(""); }}
+              onClick={() => { setRole("Employee"); setError(""); setShowPass(false); }}
             >
               Employee
             </button>
@@ -158,7 +158,7 @@ export default function AdminLogin() {
               <User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
               <input
                 type="text"
-                placeholder="Username"
+                placeholder={role === "Employee" ? "Login ID" : "Username"}
                 value={username}
                 onChange={e => setUsername(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:border-maroon focus:ring-1 focus:ring-maroon"
@@ -170,7 +170,7 @@ export default function AdminLogin() {
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
               <input
                 type={showPass ? "text" : "password"}
-                placeholder={role === "Employee" ? "Phone number" : "Password"}
+                placeholder="Password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-md focus:outline-none focus:border-maroon focus:ring-1 focus:ring-maroon"

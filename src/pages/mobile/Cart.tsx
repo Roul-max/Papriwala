@@ -20,7 +20,11 @@ export default function Cart() {
             <button onClick={() => navigate("/")} className="mt-4 text-maroon font-semibold text-sm underline">Browse Menu</button>
           </div>
         )}
-        {items.map(item => (
+        {items.map(item => {
+          const stock = (item as any).stock ?? Infinity;
+          const isOut = stock <= 0;
+          const isLow = !isOut && stock !== Infinity && item.qty >= stock;
+          return (
           <div key={item.id} className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 flex flex-col gap-3 relative">
             <div className="flex gap-4">
               <Link to={`/product/${item.product_id}`} className="w-20 h-20 rounded-lg overflow-hidden shrink-0 bg-amber-50">
@@ -31,6 +35,8 @@ export default function Cart() {
                   <Link to={`/product/${item.product_id}`} className="flex-1">
                     <h3 className="font-bold text-gray-800 text-sm">{item.name}</h3>
                     <p className="text-gray-500 text-xs">{item.size} • ₹{item.price}</p>
+                    {isOut && <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full">Out of Stock</span>}
+                    {isLow && !isOut && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full">Max qty reached</span>}
                   </Link>
                   <button onClick={() => removeFromCart(item.id)} className="text-red-300 hover:text-red-500 ml-2">
                     <Trash2 size={18} />
@@ -41,13 +47,15 @@ export default function Cart() {
                   <div className="flex items-center bg-gray-50 border border-gray-200 rounded-full px-1">
                     <button onClick={() => updateQty(item.id, -1)} className="w-6 h-6 flex items-center justify-center text-gray-600 font-bold">-</button>
                     <span className="w-6 text-center font-bold text-sm">{item.qty}</span>
-                    <button onClick={() => updateQty(item.id, 1)} className="w-6 h-6 flex items-center justify-center text-gray-600 font-bold">+</button>
+                    <button onClick={() => updateQty(item.id, 1)} disabled={isLow || isOut}
+                      className="w-6 h-6 flex items-center justify-center text-gray-600 font-bold disabled:opacity-30 disabled:cursor-not-allowed">+</button>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {items.length > 0 && (

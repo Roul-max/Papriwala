@@ -1,14 +1,26 @@
-import { useEffect, useState } from "react";
-import { Star, Trash2, CheckCircle2 } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Star, Trash2 } from "lucide-react";
 import { apiFetch } from "../../lib/apiFetch";
 
 export default function AdminReviews() {
   const [reviews, setReviews] = useState<any[]>([]);
+  const [newBadge, setNewBadge] = useState(false);
 
-  const fetch_ = () =>
+  const fetch_ = useCallback(() => {
     apiFetch("/api/reviews").then(r => r.json()).then(d => setReviews(Array.isArray(d) ? d : []));
+  }, []);
 
-  useEffect(() => { fetch_(); }, []);
+  const onNewReview = useCallback(() => {
+    fetch_();
+    setNewBadge(true);
+    setTimeout(() => setNewBadge(false), 4000);
+  }, [fetch_]);
+
+  useEffect(() => {
+    fetch_();
+    window.addEventListener("new-review", onNewReview);
+    return () => window.removeEventListener("new-review", onNewReview);
+  }, [fetch_, onNewReview]);
 
   const handleDelete = async (id: string) => {
     await apiFetch(`/api/reviews/${id}`, { method: "DELETE" });
@@ -23,7 +35,12 @@ export default function AdminReviews() {
     <div className="space-y-6">
       <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="font-serif text-xl text-maroon font-bold">Customer Feedback & Reviews</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="font-serif text-xl text-maroon font-bold">Customer Feedback & Reviews</h3>
+            {newBadge && (
+              <span className="bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full animate-pulse">New Review!</span>
+            )}
+          </div>
           <div className="flex items-center gap-2 bg-yellow-50 px-4 py-2 rounded-full border border-yellow-100">
             <span className="font-bold text-yellow-700 text-lg">{avgRating}</span>
             <div className="flex text-yellow-500">

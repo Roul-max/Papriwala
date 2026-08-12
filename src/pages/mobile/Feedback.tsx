@@ -1,19 +1,13 @@
-import { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { ChevronLeft, Star } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../../lib/apiFetch";
 
 export default function Feedback() {
   const navigate = useNavigate();
-  const [reviews, setReviews] = useState<any[]>([]);
   const [form, setForm] = useState({ author: "", rating: 5, text: "" });
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-
-  const fetchReviews = () =>
-    apiFetch("/api/reviews").then(r => r.json()).then(d => setReviews(Array.isArray(d) ? d : []));
-
-  useEffect(() => { fetchReviews(); }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,7 +21,6 @@ export default function Feedback() {
     setSubmitting(false);
     setSubmitted(true);
     setForm({ author: "", rating: 5, text: "" });
-    fetchReviews();
     setTimeout(() => setSubmitted(false), 3000);
   };
 
@@ -38,23 +31,6 @@ export default function Feedback() {
           <ChevronLeft size={24} />
         </button>
         <h2 className="font-serif text-xl text-gold font-bold uppercase tracking-wider">FEEDBACK</h2>
-      </div>
-
-      <div className="p-4 space-y-4">
-        {reviews.length === 0 && (
-          <p className="text-center text-gray-400 py-8 italic">No reviews yet. Be the first!</p>
-        )}
-        {reviews.map((r: any) => (
-          <div key={r.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-            <div className="flex items-center gap-1 mb-2 text-gold">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Star key={i} size={16} fill={i < r.rating ? "currentColor" : "none"} className={i < r.rating ? "text-gold" : "text-gray-300"} />
-              ))}
-            </div>
-            <p className="text-gray-700 italic mb-2">"{r.text}"</p>
-            <span className="text-xs text-gray-500 font-medium">- {r.author}</span>
-          </div>
-        ))}
       </div>
 
       <div className="p-4 mt-2">

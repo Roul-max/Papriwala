@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Phone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -7,6 +7,20 @@ export default function SplashLogin() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  // If already logged in or guest, skip login
+  useEffect(() => {
+    if (localStorage.getItem("customerToken") || localStorage.getItem("guestBrowse") === "true") {
+      navigate("/", { replace: true });
+    }
+  }, []);
+
+  const handleGuestBrowse = () => {
+    localStorage.setItem("guestBrowse", "true");
+    localStorage.removeItem("customerToken");
+    localStorage.setItem("customerName", "Guest");
+    navigate("/");
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,9 +91,9 @@ export default function SplashLogin() {
           </button>
         </form>
 
-        <div className="text-center mt-6">
-          <button onClick={() => navigate("/admin/login")} className="text-maroon text-xs font-semibold hover:underline">
-            Admin Login →
+        <div className="text-center mt-4">
+          <button onClick={handleGuestBrowse} className="text-gray-500 text-xs hover:underline">
+            Browse menu without signing in →
           </button>
         </div>
         <p className="text-center text-gray-400 text-[10px] mt-4 uppercase tracking-wider">

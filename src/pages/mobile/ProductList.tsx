@@ -97,25 +97,52 @@ export default function ProductList() {
               </Link>
               {product.unit === "gm" ? (
                 <div className="flex items-center gap-1 mt-2">
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="gm"
-                    value={gms[product.id] || ""}
-                    onChange={e => setGms(prev => ({ ...prev, [product.id]: e.target.value }))}
-                    className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:border-maroon"
-                  />
-                  <button
-                    onClick={() => { const g = Number(gms[product.id]); if (g > 0) { addToCart(product, "Regular", g); setGms(prev => ({ ...prev, [product.id]: "" })); } }}
-                    className="bg-maroon text-white text-xs font-bold px-3 py-1.5 rounded-full hover:bg-maroon-light"
-                  >Add</button>
+                  {product.current_stock_qty <= 0 ? (
+                    <span className="text-xs font-bold text-red-500 bg-red-50 px-3 py-1.5 rounded-full">Out of Stock</span>
+                  ) : (
+                    <>
+                      <input
+                        type="number"
+                        min="1"
+                        max={product.current_stock_qty}
+                        placeholder="gm"
+                        value={gms[product.id] || ""}
+                        onChange={e => setGms(prev => ({ ...prev, [product.id]: e.target.value }))}
+                        className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:border-maroon"
+                      />
+                      <button
+                        onClick={() => {
+                          const g = Number(gms[product.id]);
+                          if (!g || g <= 0) return;
+                          if (g > product.current_stock_qty) { alert(`Only ${product.current_stock_qty}gm available.`); return; }
+                          addToCart(product, "Regular", g);
+                          setGms(prev => ({ ...prev, [product.id]: "" }));
+                        }}
+                        className="bg-maroon text-white text-xs font-bold px-3 py-1.5 rounded-full hover:bg-maroon-light"
+                      >Add</button>
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="flex items-center gap-1 mt-2">
-                  <button onClick={() => setQtys(prev => ({ ...prev, [product.id]: Math.max(1, (prev[product.id] || 1) - 1) }))} className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600 font-bold">-</button>
-                  <span className="w-6 text-center text-sm font-bold">{qtys[product.id] || 1}</span>
-                  <button onClick={() => setQtys(prev => ({ ...prev, [product.id]: (prev[product.id] || 1) + 1 }))} className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600 font-bold">+</button>
-                  <button onClick={() => { addToCart(product, undefined, qtys[product.id] || 1); setQtys(prev => ({ ...prev, [product.id]: 1 })); }} className="bg-maroon text-white text-xs font-bold px-3 py-1.5 rounded-full hover:bg-maroon-light ml-1">Add</button>
+                  {product.current_stock_qty <= 0 ? (
+                    <span className="text-xs font-bold text-red-500 bg-red-50 px-3 py-1.5 rounded-full">Out of Stock</span>
+                  ) : (
+                    <>
+                      <button onClick={() => setQtys(prev => ({ ...prev, [product.id]: Math.max(1, (prev[product.id] || 1) - 1) }))} className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600 font-bold">-</button>
+                      <span className="w-6 text-center text-sm font-bold">{qtys[product.id] || 1}</span>
+                      <button onClick={() => setQtys(prev => ({ ...prev, [product.id]: Math.min(product.current_stock_qty, (prev[product.id] || 1) + 1) }))} className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600 font-bold">+</button>
+                      <button
+                        onClick={() => {
+                          const q = qtys[product.id] || 1;
+                          if (q > product.current_stock_qty) { alert(`Only ${product.current_stock_qty} pcs available.`); return; }
+                          addToCart(product, undefined, q);
+                          setQtys(prev => ({ ...prev, [product.id]: 1 }));
+                        }}
+                        className="bg-maroon text-white text-xs font-bold px-3 py-1.5 rounded-full hover:bg-maroon-light ml-1"
+                      >Add</button>
+                    </>
+                  )}
                 </div>
               )}
             </div>

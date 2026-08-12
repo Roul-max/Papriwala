@@ -37,16 +37,27 @@ export default function ProductDetail() {
   };
 
   const isGm = product?.unit === "gm";
+  const isOutOfStock = product.current_stock_qty <= 0;
+  const isLowStock = !isOutOfStock && product.current_stock_qty <= product.safety_low_threshold;
 
   const handleAddToCart = () => {
+    if (isOutOfStock) return;
     const size = selectedSize || "Regular";
     const variantData = variants.find(v => v.size_label === size);
     const finalPrice = variantData ? product.price * variantData.variant_price_modifier : product.price;
     if (isGm) {
       const grams = Number(gmInput);
       if (!grams || grams <= 0) return;
+      if (grams > product.current_stock_qty) {
+        alert(`Only ${product.current_stock_qty}gm available.`);
+        return;
+      }
       addToCart({ ...product, price: finalPrice }, size, grams);
     } else {
+      if (qty > product.current_stock_qty) {
+        alert(`Only ${product.current_stock_qty} pcs available.`);
+        return;
+      }
       addToCart({ ...product, price: finalPrice }, size, qty);
     }
     navigate("/cart");
@@ -81,7 +92,11 @@ export default function ProductDetail() {
           </button>
         </div>
         <p className="text-gold font-bold text-xl mb-1">₹{getPrice().toFixed(2)} <span className="text-sm font-normal text-gray-500">/ gm</span></p>
-        <p className="text-xs text-gray-400 mb-4">{product.current_stock_qty} {isGm ? "gm left" : "pcs left"}</p>
+        <div className="flex items-center gap-2 mb-4">
+          <p className="text-xs text-gray-400">{product.current_stock_qty} {isGm ? "gm left" : "pcs left"}</p>
+          {isOutOfStock && <span className="text-xs font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Out of Stock</span>}
+          {isLowStock && <span className="text-xs font-bold bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full">Low Stock</span>}
+        </div>
 
         {product.description ? (
           <p className="text-gray-500 text-sm leading-relaxed mb-6">{product.description}</p>
@@ -133,7 +148,7 @@ export default function ProductDetail() {
             <div className="flex items-center bg-gray-50 border border-gray-200 rounded-full px-2 py-1">
               <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-10 h-10 flex items-center justify-center text-gray-600 hover:bg-gray-200 rounded-full font-bold text-xl">-</button>
               <span className="w-12 text-center font-bold text-lg">{qty}</span>
-              <button onClick={() => setQty(qty + 1)} className="w-10 h-10 flex items-center justify-center text-gray-600 hover:bg-gray-200 rounded-full font-bold text-xl">+</button>
+              <button onClick={() => setQty(Math.min(product.current_stock_qty, qty + 1))} className="w-10 h-10 flex items-center justify-center text-gray-600 hover:bg-gray-200 rounded-full font-bold text-xl">+</button>
             </div>
           </div>
         )}
@@ -141,8 +156,9 @@ export default function ProductDetail() {
 
       {/* Sticky Bottom Bar */}
       <div className="fixed bottom-[64px] left-0 right-0 max-w-md mx-auto p-4 bg-white border-t border-gray-100 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-30">
-        <button onClick={handleAddToCart} className="w-full bg-maroon text-cream font-bold py-4 rounded-xl hover:bg-maroon-light transition-colors shadow-md flex items-center justify-center gap-2 text-lg">
-          <ShoppingBag size={20} /> Add to Cart
+        <button onClick={handleAddToCart} disabled={isOutOfStock}
+          className="w-full bg-maroon text-cream font-bold py-4 rounded-xl hover:bg-maroon-light transition-colors shadow-md flex items-center justify-center gap-2 text-lg disabled:opacity-50 disabled:cursor-not-allowed">
+          <ShoppingBag size={20} /> {isOutOfStock ? "Out of Stock" : "Add to Cart"}
         </button>
       </div>
     </div>

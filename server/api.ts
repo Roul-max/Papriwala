@@ -47,7 +47,7 @@ router.post("/auth/login", async (req, res) => {
   if (role === "Employee") {
     const employees = await dbSelect("employees", db.employees);
     const emp = employees.find(
-      (e: any) => e.name?.toLowerCase() === u.toLowerCase() && e.phone_number === p
+      (e: any) => e.login_id?.toLowerCase() === u.toLowerCase() && e.login_password === p
     );
     if (emp) {
       resetRateLimit(ip);
@@ -375,6 +375,22 @@ router.get("/orders", async (req, res) => {
 
 router.post("/orders", async (req, res) => {
   const session = (req as any).session;
+
+  // ── Stock validation before placing order ────────────────────────────────
+  const products = await dbSelect("products", db.products);
+  const insufficientItems: string[] = [];
+  for (const item of (req.body.items || [])) {
+    const qty = Number(item.qty);
+    if (!qty || qty <= 0) continue;
+    const product = products.find((p: any) => p.name?.toLowerCase() === item.name?.toLowerCase());
+    if (!product) continue;
+    if (product.current_stock_qty < qty) {
+      insufficientItems.push(`${product.name} (available: ${product.current_stock_qty}, requested: ${qty})`);
+    }
+  }
+  if (insufficientItems.length > 0)
+    return res.status(400).json({ error: "Insufficient stock", items: insufficientItems });
+
   const ts = Date.now();
   const newOrder = {
     ...req.body,
@@ -384,7 +400,6 @@ router.post("/orders", async (req, res) => {
   const saved = await dbInsert("orders", newOrder, db.orders);
 
   // ── Deduct stock for each item in the order ───────────────────────────────
-  const products = await dbSelect("products", db.products);
   for (const item of (saved.items || [])) {
     const qty = Number(item.qty);
     if (!qty || qty <= 0) continue;
@@ -431,6 +446,13 @@ router.patch("/orders/:id", async (req, res) => {
 
   broadcast({ type: "TABLE_STATE_CHANGE", payload: { table_id: order.table_id, new_status_flag: req.body.order_status } });
   res.json({ ...order, ...req.body });
+});
+
+router.delete("/orders/:id", async (req, res) => {
+  await dbDelete("orders", req.params.id);
+  const idx = db.orders.findIndex((o: any) => o.id === req.params.id);
+  if (idx !== -1) db.orders.splice(idx, 1);
+  res.json({ success: true });
 });
 
 // ─── Void (soft-delete) an order ─────────────────────────────────────────────
@@ -518,6 +540,27 @@ router.post("/expenses", async (req, res) => {
   }, db.expenses));
 });
 
+router.patch("/expenses/:id", async (req, res) => {
+  const all = await dbSelect("expenses", db.expenses);
+  if (!all.find((e: any) => e.id === req.params.id)) return res.status(404).json({ error: "Not found" });
+  const patch: any = {};
+  if (req.body.amount !== undefined)      patch.amount      = Number(req.body.amount);
+  if (req.body.description !== undefined) patch.description = sanitize(req.body.description);
+  if (req.body.dealer_id !== undefined)   patch.dealer_id   = req.body.dealer_id || null;
+  if (req.body.expense_code !== undefined) patch.expense_code = req.body.expense_code;
+  const updated = await dbUpdate("expenses", req.params.id, patch);
+  const local = db.expenses.find((e: any) => e.id === req.params.id);
+  if (local) Object.assign(local, patch);
+  res.json(updated);
+});
+
+router.delete("/expenses/:id", async (req, res) => {
+  await dbDelete("expenses", req.params.id);
+  const idx = db.expenses.findIndex((e: any) => e.id === req.params.id);
+  if (idx !== -1) db.expenses.splice(idx, 1);
+  res.json({ success: true });
+});
+
 // ─── Employees ───────────────────────────────────────────────────────────────
 router.get("/employees", async (_req, res) => {
   res.json(await dbSelect("employees", db.employees));
@@ -527,10 +570,19 @@ router.post("/employees", async (req, res) => {
   const { full_name, name, designation_tag, phone_number, salary_type_flag, base_compensation_rate, joining_date, last_working_date, avatar } = req.body;
   if (!designation_tag || !joining_date) return res.status(400).json({ error: "designation_tag and joining_date are required" });
   if (phone_number && !/^\d{10}$/.test(phone_number)) return res.status(400).json({ error: "Phone must be 10 digits" });
-  res.json(await dbInsert("employees", {
+
+  // Auto-generate login_id and login_password
+  const existingEmps = await dbSelect("employees", db.employees);
+  const empNumber = String(existingEmps.length + 1).padStart(3, "0");
+  const login_id = `EMP${empNumber}`;
+  const rawName = (name || full_name || "").trim();
+  const firstName = rawName.split(" ")[0] || "Emp";
+  const login_password = `${firstName}@${empNumber}`;
+
+  const saved = await dbInsert("employees", {
     id: `EMP-${Date.now()}`,
-    name: sanitize(name || full_name || ""),
-    full_name: sanitize(full_name || name || ""),
+    name: rawName,
+    full_name: rawName,
     designation_tag: sanitize(designation_tag),
     phone_number: phone_number || null,
     salary_type_flag: ["Monthly", "Daily"].includes(salary_type_flag) ? salary_type_flag : "Monthly",
@@ -538,7 +590,10 @@ router.post("/employees", async (req, res) => {
     joining_date,
     last_working_date: last_working_date || null,
     avatar: avatar || null,
-  }, db.employees));
+    login_id,
+    login_password,
+  }, db.employees);
+  res.json({ ...saved, login_id, login_password });
 });
 
 router.delete("/employees/:id", async (req, res) => {
@@ -549,16 +604,30 @@ router.delete("/employees/:id", async (req, res) => {
 });
 
 router.patch("/employees/:id", async (req, res) => {
-  const { name, full_name, avatar } = req.body;
+  const { name, full_name, avatar, login_id, login_password, designation_tag, phone_number, salary_type_flag, base_compensation_rate, joining_date, last_working_date } = req.body;
   const patch: Record<string, any> = {};
-  if (name)                 patch.name      = name;
-  if (full_name)            patch.full_name = full_name;
-  if (avatar !== undefined) patch.avatar    = avatar;
+  if (name !== undefined)                    patch.name                   = name;
+  if (full_name !== undefined)               patch.full_name              = full_name;
+  if (avatar !== undefined)                  patch.avatar                 = avatar;
+  if (login_id !== undefined)                patch.login_id               = login_id.trim();
+  if (login_password !== undefined)          patch.login_password         = login_password.trim();
+  if (designation_tag !== undefined)         patch.designation_tag        = sanitize(designation_tag);
+  if (phone_number !== undefined)            patch.phone_number           = phone_number || null;
+  if (salary_type_flag !== undefined)        patch.salary_type_flag       = salary_type_flag;
+  if (base_compensation_rate !== undefined)  patch.base_compensation_rate = Number(base_compensation_rate);
+  if (joining_date !== undefined)            patch.joining_date           = joining_date;
+  if (last_working_date !== undefined)       patch.last_working_date      = last_working_date || null;
 
-  const updated = await dbUpdate("employees", req.params.id, patch);
   const local = db.employees.find((e: any) => e.id === req.params.id);
   if (local) Object.assign(local, patch);
-  res.json(updated);
+  if (supabase) {
+    console.log("[employees PATCH] id:", req.params.id, "patch:", JSON.stringify(patch));
+    const { data, error } = await supabase.from("employees").update(patch).eq("id", req.params.id).select();
+    console.log("[employees PATCH] result:", JSON.stringify(data), "error:", error?.message);
+    if (error) { return res.status(500).json({ error: error.message }); }
+    if (!data || data.length === 0) { console.warn("[employees PATCH] No rows updated — id not found in Supabase:", req.params.id); }
+  }
+  res.json({ id: req.params.id, ...patch });
 });
 
 // ─── Attendance ──────────────────────────────────────────────────────────────
@@ -638,6 +707,21 @@ router.post("/auth/change-password", async (req, res) => {
   res.json({ success: true });
 });
 
+// ─── Balance top-up ──────────────────────────────────────────────────────────
+router.post("/settings/balance", async (req, res) => {
+  const { type, amount } = req.body; // type: "cash" | "account"
+  if (!type || !amount || Number(amount) <= 0) return res.status(400).json({ error: "type and positive amount required" });
+  if (type === "cash") {
+    db.settings = { ...db.settings, cashBalance: Number(db.settings?.cashBalance || 0) + Number(amount) };
+  } else if (type === "account") {
+    db.settings = { ...db.settings, accountBalance: Number(db.settings?.accountBalance || 0) + Number(amount) };
+  } else {
+    return res.status(400).json({ error: "type must be cash or account" });
+  }
+  if (supabase) await supabase.from("settings").upsert({ id: 1, value: db.settings });
+  res.json({ cashBalance: db.settings.cashBalance, accountBalance: db.settings.accountBalance });
+});
+
 // ─── Raw Material Due-Soon Alerts ───────────────────────────────────────────
 router.get("/raw-material-purchases/due-alerts", async (_req, res) => {
   if (!db.raw_material_purchases) db.raw_material_purchases = [];
@@ -691,6 +775,23 @@ router.get("/raw-material-purchases", async (_req, res) => {
 router.post("/raw-material-purchases", async (req, res) => {
   if (!db.raw_material_purchases) db.raw_material_purchases = [];
   const dueDate = req.body.due_date || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+  // If already paid at creation, deduct from the chosen balance
+  if (req.body.is_paid === true) {
+    const amount = Number(req.body.qty) * Number(req.body.rate_per_unit);
+    const method = req.body.payment_method; // "cash" | "online"
+    if (method === "cash") {
+      const current = Number(db.settings?.cashBalance || 0);
+      if (current < amount) return res.status(400).json({ error: `Insufficient cash balance (₹${current.toFixed(2)} available)` });
+      db.settings = { ...db.settings, cashBalance: current - amount };
+    } else if (method === "online") {
+      const current = Number(db.settings?.accountBalance || 0);
+      if (current < amount) return res.status(400).json({ error: `Insufficient account balance (₹${current.toFixed(2)} available)` });
+      db.settings = { ...db.settings, accountBalance: current - amount };
+    }
+    if (supabase) await supabase.from("settings").upsert({ id: 1, value: db.settings });
+  }
+
   res.json(await dbInsert("raw_material_purchases", {
     id: crypto.randomUUID(),
     ...req.body,
@@ -702,9 +803,56 @@ router.post("/raw-material-purchases", async (req, res) => {
 
 router.patch("/raw-material-purchases/:id", async (req, res) => {
   if (!db.raw_material_purchases) db.raw_material_purchases = [];
-  const updated = await dbUpdate("raw_material_purchases", req.params.id, req.body);
+  const all = await dbSelect("raw_material_purchases", db.raw_material_purchases);
+  const purchase = all.find((r: any) => r.id === req.params.id);
+  if (!purchase) return res.status(404).json({ error: "Not found" });
+
+  const patch: any = {};
+  const method = req.body.payment_method; // "cash" | "online"
+
+  // Full payment
+  if (req.body.is_paid === true && !purchase.is_paid) {
+    const amount = Number(purchase.qty) * Number(purchase.rate_per_unit) - Number(purchase.amount_paid || 0);
+    if (method === "cash") {
+      const current = Number(db.settings?.cashBalance || 0);
+      if (current < amount) return res.status(400).json({ error: `Insufficient cash balance (₹${current.toFixed(2)} available)` });
+      db.settings = { ...db.settings, cashBalance: current - amount };
+    } else if (method === "online") {
+      const current = Number(db.settings?.accountBalance || 0);
+      if (current < amount) return res.status(400).json({ error: `Insufficient account balance (₹${current.toFixed(2)} available)` });
+      db.settings = { ...db.settings, accountBalance: current - amount };
+    }
+    if (supabase) await supabase.from("settings").upsert({ id: 1, value: db.settings });
+    patch.is_paid = true;
+    patch.amount_paid = Number(purchase.qty) * Number(purchase.rate_per_unit);
+    patch.payment_method = method;
+  }
+  // Partial payment
+  else if (req.body.partial_payment !== undefined) {
+    const partial = Number(req.body.partial_payment);
+    const total = Number(purchase.qty) * Number(purchase.rate_per_unit);
+    const alreadyPaid = Number(purchase.amount_paid || 0);
+    const newPaid = alreadyPaid + partial;
+    if (partial <= 0) return res.status(400).json({ error: "Partial amount must be positive" });
+    if (newPaid > total) return res.status(400).json({ error: "Payment exceeds total amount" });
+    if (method === "cash") {
+      const current = Number(db.settings?.cashBalance || 0);
+      if (current < partial) return res.status(400).json({ error: `Insufficient cash balance (₹${current.toFixed(2)} available)` });
+      db.settings = { ...db.settings, cashBalance: current - partial };
+    } else if (method === "online") {
+      const current = Number(db.settings?.accountBalance || 0);
+      if (current < partial) return res.status(400).json({ error: `Insufficient account balance (₹${current.toFixed(2)} available)` });
+      db.settings = { ...db.settings, accountBalance: current - partial };
+    }
+    if (supabase) await supabase.from("settings").upsert({ id: 1, value: db.settings });
+    patch.amount_paid = newPaid;
+    patch.payment_method = method;
+    if (newPaid >= total) patch.is_paid = true;
+  }
+
+  const updated = await dbUpdate("raw_material_purchases", req.params.id, patch);
   const local = db.raw_material_purchases.find((r: any) => r.id === req.params.id);
-  if (local) Object.assign(local, req.body);
+  if (local) Object.assign(local, patch);
   res.json(updated);
 });
 
@@ -730,13 +878,15 @@ router.post("/reviews", async (req, res) => {
   const r = Number(rating);
   if (r < 1 || r > 5) return res.status(400).json({ error: "rating must be between 1 and 5" });
 
-  res.json(await dbInsert("reviews", {
+  const saved = await dbInsert("reviews", {
     id: crypto.randomUUID(),
     author: sanitize(author),
     rating: r,
     text: sanitize(text),
     created_at: new Date().toISOString(),
-  }, db.reviews));
+  }, db.reviews);
+  broadcast({ type: "NEW_REVIEW", payload: { author: saved.author, rating: saved.rating } });
+  res.json(saved);
 });
 
 router.delete("/reviews/:id", async (req, res) => {

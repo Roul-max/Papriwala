@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, X, Trash2, EyeOff, CheckCircle2, AlertCircle, Clock, AlertTriangle, Filter } from "lucide-react";
+import { Plus, X, Trash2, EyeOff, CheckCircle2, AlertCircle, Clock, AlertTriangle, Filter, Edit2 } from "lucide-react";
 import { apiFetch } from "../../lib/apiFetch";
 import { useAccess } from "../../hooks/useAccess";
 
@@ -19,13 +19,33 @@ export default function DealerExpenses() {
   const [dealerError, setDealerError] = useState("");
 
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [expenseForm, setExpenseForm] = useState({ expense_code: "EXP_RAW_MATERIAL", amount: "", dealer_id: "", description: "" });
+  const [expenseForm, setExpenseForm] = useState({ expense_code: "EXP_SALARY_DRAW", amount: "", dealer_id: "", description: "" });
   const [expenseError, setExpenseError] = useState("");
 
   const [showRawModal, setShowRawModal] = useState(false);
   const [rawForm, setRawForm] = useState({ material_name: "", qty: "", unit: "kg", rate_per_unit: "", dealer_id: "", notes: "", is_paid: false, due_date: new Date(Date.now() + 7*24*60*60*1000).toISOString().split("T")[0] });
   const [rawError, setRawError] = useState("");
+  const [rawPayModal, setRawPayModal] = useState<{ form: typeof rawForm } | null>(null);
+  const [rawPayMethod, setRawPayMethod] = useState<"cash" | "online">("cash");
+  const [rawPayError, setRawPayError] = useState("");
   const [rawFilter, setRawFilter] = useState<"all" | "pending" | "overdue" | "paid">("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [ledgerFrom, setLedgerFrom] = useState("");
+  const [ledgerTo, setLedgerTo] = useState("");
+  const [cashBalance, setCashBalance] = useState(0);
+  const [accountBalance, setAccountBalance] = useState(0);
+  const [payModal, setPayModal] = useState<{ id: string; totalAmount: number } | null>(null);
+  const [payMethod, setPayMethod] = useState<"cash" | "online">("cash");
+  const [payType, setPayType] = useState<"full" | "partial">("full");
+  const [payPartial, setPayPartial] = useState("");
+  const [payError, setPayError] = useState("");
+  const [topupModal, setTopupModal] = useState<"cash" | "account" | null>(null);
+  const [topupAmount, setTopupAmount] = useState("");
+  const [editExpense, setEditExpense] = useState<any | null>(null);
+  const [editExpenseForm, setEditExpenseForm] = useState({ expense_code: "", amount: "", dealer_id: "", description: "" });
+  const [editExpenseError, setEditExpenseError] = useState("");
+  const [deleteExpenseId, setDeleteExpenseId] = useState<string | null>(null);
 
   const access = useAccess("Financial Reports");
   const isReadOnly = access === "Read-Only";
@@ -38,7 +58,14 @@ export default function DealerExpenses() {
       apiFetch("/api/products").then(r => r.json()).catch(() => []),
       apiFetch("/api/raw-material-purchases").then(r => r.json()).catch(() => []),
       apiFetch("/api/employees").then(r => r.json()).catch(() => []),
-    ]).then(([d, e, o, p, rm, emps]) => { setDealers(d); setExpenses(e); setOrders(o); setProducts(p); setRawPurchases(Array.isArray(rm) ? rm : []); setEmployees(Array.isArray(emps) ? emps : []); });
+      apiFetch("/api/settings").then(r => r.json()).catch(() => ({})),
+    ]).then(([d, e, o, p, rm, emps, settings]) => {
+      setDealers(d); setExpenses(e); setOrders(o); setProducts(p);
+      setRawPurchases(Array.isArray(rm) ? rm : []);
+      setEmployees(Array.isArray(emps) ? emps : []);
+      setCashBalance(Number(settings?.cashBalance || 0));
+      setAccountBalance(Number(settings?.accountBalance || 0));
+    });
   };
 
   useEffect(() => { fetchAll(); }, []);
@@ -52,23 +79,36 @@ export default function DealerExpenses() {
   const pendingPurchases = rawPurchases.filter((r: any) => !r.is_paid);
   const overduePurchases = rawPurchases.filter((r: any) => !r.is_paid && r.due_date && r.due_date < today);
   const dueSoonPurchases = rawPurchases.filter((r: any) => !r.is_paid && r.due_date && r.due_date >= today && r.due_date <= twoDaysLater);
-  const totalPending = pendingPurchases.reduce((s: number, r: any) => s + r.qty * r.rate_per_unit, 0);
+  const totalPending = pendingPurchases.reduce((s: number, r: any) => s + (r.qty * r.rate_per_unit - Number(r.amount_paid || 0)), 0);
 
   const filteredRaw = rawPurchases.filter((r: any) => {
-    if (rawFilter === "pending") return !r.is_paid;
-    if (rawFilter === "overdue") return !r.is_paid && r.due_date && r.due_date < today;
-    if (rawFilter === "paid")    return r.is_paid;
+    if (rawFilter === "pending" && r.is_paid) return false;
+    if (rawFilter === "overdue" && !(!r.is_paid && r.due_date && r.due_date < today)) return false;
+    if (rawFilter === "paid" && !r.is_paid) return false;
+    const d = (r.purchase_date || "").split("T")[0];
+    if (dateFrom && d < dateFrom) return false;
+    if (dateTo && d > dateTo) return false;
     return true;
   });
 
-  const totalPOSInflows = orders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
-  const totalStockValue = products.reduce((s, p) => s + (Number(p.unit_purchase_cost) * Number(p.current_stock_qty) || 0), 0);
-  const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount), 0);
+  const inDateRange = (dateStr: string) => {
+    const d = (dateStr || "").split("T")[0];
+    if (ledgerFrom && d < ledgerFrom) return false;
+    if (ledgerTo && d > ledgerTo) return false;
+    return true;
+  };
+
+  const filteredOrders = orders.filter(o => inDateRange(o.timestamp));
+  const filteredExpenses = expenses.filter(e => inDateRange(e.expense_date));
+
+  const totalPOSInflows = filteredOrders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
+  const totalStockValue = products.reduce((s, p) => s + (Number(p.unit_purchase_cost > 0 ? p.unit_purchase_cost : p.price) * Number(p.current_stock_qty || 0)), 0);
+  const totalExpenses = filteredExpenses.reduce((s, e) => s + Number(e.amount), 0);
   const netIncome = totalPOSInflows - totalExpenses;
-  // §2.4.3 Outstanding procurement balances due to dealers
-  const outstandingPayables = expenses
-    .filter(e => e.expense_code === "EXP_RAW_MATERIAL")
-    .reduce((s, e) => s + Number(e.amount), 0);
+  const outstandingPayables = rawPurchases
+    .filter((r: any) => !r.is_paid)
+    .reduce((s: number, r: any) => s + (Number(r.qty) * Number(r.rate_per_unit) - Number(r.amount_paid || 0)), 0);
+  const outstandingCount = rawPurchases.filter((r: any) => !r.is_paid).length;
 
   const handleAddDealer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,9 +132,6 @@ export default function DealerExpenses() {
     e.preventDefault();
     setExpenseError("");
     if (!expenseForm.amount || Number(expenseForm.amount) <= 0) { setExpenseError("Enter a valid amount."); return; }
-    if (expenseForm.expense_code === "EXP_RAW_MATERIAL" && !expenseForm.dealer_id) {
-      setExpenseError("Raw Material expenses must be linked to a dealer."); return;
-    }
     if (expenseForm.expense_code === "EXP_SALARY_DRAW" && !expenseForm.dealer_id) {
       setExpenseError("Salary Draw must be linked to an employee."); return;
     }
@@ -103,7 +140,7 @@ export default function DealerExpenses() {
       body: JSON.stringify({ ...expenseForm, amount: Number(expenseForm.amount), dealer_id: expenseForm.dealer_id || null })
     });
     setShowExpenseModal(false);
-    setExpenseForm({ expense_code: "EXP_RAW_MATERIAL", amount: "", dealer_id: "", description: "" });
+    setExpenseForm({ expense_code: "EXP_SALARY_DRAW", amount: "", dealer_id: "", description: "" });
     fetchAll();
   };
 
@@ -111,12 +148,102 @@ export default function DealerExpenses() {
     e.preventDefault();
     setRawError("");
     if (!rawForm.material_name || !rawForm.qty || !rawForm.rate_per_unit) { setRawError("Fill all required fields."); return; }
+    if (rawForm.is_paid) {
+      // Ask payment method before saving
+      setShowRawModal(false);
+      setRawPayModal({ form: rawForm });
+      setRawPayMethod("cash");
+      setRawPayError("");
+      return;
+    }
     await apiFetch("/api/raw-material-purchases", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...rawForm, qty: Number(rawForm.qty), rate_per_unit: Number(rawForm.rate_per_unit), dealer_id: rawForm.dealer_id || null })
     });
     setShowRawModal(false);
     setRawForm({ material_name: "", qty: "", unit: "kg", rate_per_unit: "", dealer_id: "", notes: "", is_paid: false, due_date: new Date(Date.now() + 7*24*60*60*1000).toISOString().split("T")[0] });
+    fetchAll();
+  };
+
+  const handleConfirmRawPay = async () => {
+    if (!rawPayModal) return;
+    setRawPayError("");
+    const { form } = rawPayModal;
+    const total = Number(form.qty) * Number(form.rate_per_unit);
+    const avail = rawPayMethod === "cash" ? cashBalance : accountBalance;
+    if (avail < total) {
+      setRawPayError(`Insufficient ${rawPayMethod === "cash" ? "cash" : "account"} balance (₹${avail.toFixed(2)} available).`);
+      return;
+    }
+    const res = await apiFetch("/api/raw-material-purchases", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...form, qty: Number(form.qty), rate_per_unit: Number(form.rate_per_unit), dealer_id: form.dealer_id || null, is_paid: true, payment_method: rawPayMethod, amount_paid: total })
+    });
+    if (!res.ok) { const d = await res.json(); setRawPayError(d.error || "Failed."); return; }
+    setRawPayModal(null);
+    setRawForm({ material_name: "", qty: "", unit: "kg", rate_per_unit: "", dealer_id: "", notes: "", is_paid: false, due_date: new Date(Date.now() + 7*24*60*60*1000).toISOString().split("T")[0] });
+    fetchAll();
+  };
+
+  const handleMarkPaid = async () => {
+    if (!payModal) return;
+    setPayError("");
+    const partial = payType === "partial" ? Number(payPartial) : 0;
+    if (payType === "partial") {
+      if (!payPartial || partial <= 0) { setPayError("Enter a valid partial amount."); return; }
+      if (partial >= payModal.totalAmount) { setPayError("Partial amount must be less than total. Use Full Payment instead."); return; }
+    }
+    const body: any = { payment_method: payMethod };
+    if (payType === "full") {
+      body.is_paid = true;
+    } else {
+      body.partial_payment = partial;
+    }
+    const res = await apiFetch(`/api/raw-material-purchases/${payModal.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { setPayError(data.error || "Failed to process payment."); return; }
+    setPayModal(null);
+    fetchAll();
+  };
+
+  const openEditExpense = (exp: any) => {
+    setEditExpense(exp);
+    setEditExpenseForm({ expense_code: exp.expense_code, amount: String(exp.amount), dealer_id: exp.dealer_id || "", description: exp.description || "" });
+    setEditExpenseError("");
+  };
+
+  const handleEditExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditExpenseError("");
+    if (!editExpenseForm.amount || Number(editExpenseForm.amount) <= 0) { setEditExpenseError("Enter a valid amount."); return; }
+    if (editExpenseForm.expense_code === "EXP_SALARY_DRAW" && !editExpenseForm.dealer_id) { setEditExpenseError("Salary Draw must be linked to an employee."); return; }
+    await apiFetch(`/api/expenses/${editExpense.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...editExpenseForm, amount: Number(editExpenseForm.amount), dealer_id: editExpenseForm.dealer_id || null }),
+    });
+    setEditExpense(null);
+    fetchAll();
+  };
+
+  const handleDeleteExpense = async () => {
+    if (!deleteExpenseId) return;
+    await apiFetch(`/api/expenses/${deleteExpenseId}`, { method: "DELETE" });
+    setDeleteExpenseId(null);
+    fetchAll();
+  };
+
+  const handleTopup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!topupModal || !topupAmount || Number(topupAmount) <= 0) return;
+    await apiFetch("/api/settings/balance", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: topupModal, amount: Number(topupAmount) }),
+    });
+    setTopupModal(null);
+    setTopupAmount("");
     fetchAll();
   };
 
@@ -182,7 +309,7 @@ export default function DealerExpenses() {
 
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 flex flex-col">
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-bold text-gray-800">Raw Material Purchase Log</h3>
                 <div className="flex gap-1 ml-2">
                   {(["all", "pending", "overdue", "paid"] as const).map(f => (
@@ -193,6 +320,17 @@ export default function DealerExpenses() {
                       {f}
                     </button>
                   ))}
+                </div>
+                <div className="flex items-center gap-1">
+                  <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                    className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-maroon" />
+                  <span className="text-xs text-gray-400">–</span>
+                  <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                    className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-maroon" />
+                  {(dateFrom || dateTo) && (
+                    <button onClick={() => { setDateFrom(""); setDateTo(""); }}
+                      className="text-xs text-gray-400 hover:text-red-500 px-1">✕</button>
+                  )}
                 </div>
               </div>
               {!isReadOnly && (
@@ -242,10 +380,19 @@ export default function DealerExpenses() {
                         <td className="py-3 px-4">
                           {r.is_paid
                             ? <span className="flex items-center gap-1 text-green-600 text-xs font-bold"><CheckCircle2 size={12} /> Paid</span>
-                            : <button onClick={async () => { await apiFetch(`/api/raw-material-purchases/${r.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_paid: true }) }); fetchAll(); }}
-                                className="text-xs bg-green-600 text-white px-2 py-1 rounded font-semibold hover:bg-green-700">
-                                Mark Paid
-                              </button>
+                            : r.amount_paid > 0
+                              ? <div className="space-y-1">
+                                  <span className="text-xs text-orange-600 font-bold">Partial — ₹{Number(r.amount_paid).toFixed(2)} paid</span>
+                                  <p className="text-[10px] text-gray-400">₹{(r.qty * r.rate_per_unit - r.amount_paid).toFixed(2)} remaining</p>
+                                  <button onClick={() => { setPayModal({ id: r.id, totalAmount: r.qty * r.rate_per_unit - r.amount_paid }); setPayMethod("cash"); setPayType("full"); setPayPartial(""); setPayError(""); }}
+                                    className="text-xs bg-orange-500 text-white px-2 py-1 rounded font-semibold hover:bg-orange-600">
+                                    Pay Remaining
+                                  </button>
+                                </div>
+                              : <button onClick={() => { setPayModal({ id: r.id, totalAmount: r.qty * r.rate_per_unit }); setPayMethod("cash"); setPayType("full"); setPayPartial(""); setPayError(""); }}
+                                  className="text-xs bg-green-600 text-white px-2 py-1 rounded font-semibold hover:bg-green-700">
+                                  Mark Paid
+                                </button>
                           }
                         </td>
                         <td className="py-3 px-4 text-gray-400 text-xs">{r.notes || "—"}</td>
@@ -281,23 +428,54 @@ export default function DealerExpenses() {
         </div>
       </div>
 
+      {/* Cash & Account Balances */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 border-l-4 border-l-emerald-500 flex justify-between items-center">
+          <div>
+            <p className="text-sm text-gray-500 font-semibold mb-1">💵 Cash Balance</p>
+            <p className="text-2xl font-bold text-emerald-600">₹{cashBalance.toFixed(2)}</p>
+          </div>
+          {!isReadOnly && <button onClick={() => { setTopupModal("cash"); setTopupAmount(""); }} className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded font-semibold hover:bg-emerald-700">+ Add Cash</button>}
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 border-l-4 border-l-blue-500 flex justify-between items-center">
+          <div>
+            <p className="text-sm text-gray-500 font-semibold mb-1">🏦 Account Balance</p>
+            <p className="text-2xl font-bold text-blue-600">₹{accountBalance.toFixed(2)}</p>
+          </div>
+          {!isReadOnly && <button onClick={() => { setTopupModal("account"); setTopupAmount(""); }} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded font-semibold hover:bg-blue-700">+ Add Funds</button>}
+        </div>
+      </div>
+
       {/* §2.4.3 Liabilities & Equity Ledger */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-        <h3 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wider">Liabilities &amp; Equity Ledger</h3>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wider">Liabilities &amp; Equity Ledger</h3>
+          <div className="flex items-center gap-1">
+            <input type="date" value={ledgerFrom} onChange={e => setLedgerFrom(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-maroon" />
+            <span className="text-xs text-gray-400">–</span>
+            <input type="date" value={ledgerTo} onChange={e => setLedgerTo(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-maroon" />
+            {(ledgerFrom || ledgerTo) && (
+              <button onClick={() => { setLedgerFrom(""); setLedgerTo(""); }}
+                className="text-xs text-gray-400 hover:text-red-500 px-1">✕</button>
+            )}
+          </div>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="border border-gray-100 rounded-lg p-3 bg-red-50">
             <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Outstanding Dealer Payables</p>
             <p className="text-xl font-bold text-red-600">₹{outstandingPayables.toFixed(2)}</p>
-            <p className="text-xs text-gray-400 mt-1">Raw material procurement balances due to dealers</p>
+            <p className="text-xs text-gray-400 mt-1">{outstandingCount} unpaid purchase{outstandingCount !== 1 ? "s" : ""} pending</p>
           </div>
           <div className="border border-gray-100 rounded-lg p-3 bg-orange-50">
             <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Total Salary Draws</p>
-            <p className="text-xl font-bold text-orange-600">₹{expenses.filter(e => e.expense_code === "EXP_SALARY_DRAW").reduce((s, e) => s + Number(e.amount), 0).toFixed(2)}</p>
+            <p className="text-xl font-bold text-orange-600">₹{filteredExpenses.filter(e => e.expense_code === "EXP_SALARY_DRAW").reduce((s, e) => s + Number(e.amount), 0).toFixed(2)}</p>
             <p className="text-xs text-gray-400 mt-1">Payroll &amp; owner compensation disbursed</p>
           </div>
           <div className="border border-gray-100 rounded-lg p-3 bg-yellow-50">
             <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Misc Operational Costs</p>
-            <p className="text-xl font-bold text-yellow-600">₹{expenses.filter(e => e.expense_code === "EXP_MISC_OPERATIONAL").reduce((s, e) => s + Number(e.amount), 0).toFixed(2)}</p>
+            <p className="text-xl font-bold text-yellow-600">₹{filteredExpenses.filter(e => e.expense_code === "EXP_MISC_OPERATIONAL").reduce((s, e) => s + Number(e.amount), 0).toFixed(2)}</p>
             <p className="text-xs text-gray-400 mt-1">Rent, utilities, maintenance &amp; auxiliary</p>
           </div>
         </div>
@@ -324,21 +502,32 @@ export default function DealerExpenses() {
                   <th className="py-3 px-4">Name</th>
                   <th className="py-3 px-4">GSTIN</th>
                   <th className="py-3 px-4">Phone</th>
+                  <th className="py-3 px-4">Outstanding</th>
                   <th className="py-3 px-4"></th>
                 </tr>
               </thead>
               <tbody>
-                {dealers.map((d) => (
-                  <tr key={d.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 px-4 font-bold text-gray-800">{d.name}</td>
-                    <td className="py-3 px-4 font-mono text-xs">{d.gstin}</td>
-                    <td className="py-3 px-4 text-gray-600">{d.phone}</td>
-                    <td className="py-3 px-4">
-                      {!isReadOnly && <button onClick={() => handleDeleteDealer(d.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>}
-                    </td>
-                  </tr>
-                ))}
-                {dealers.length === 0 && <tr><td colSpan={4} className="py-8 text-center text-gray-500 italic">No dealers registered.</td></tr>}
+                {dealers.map((d) => {
+                  const dealerOutstanding = rawPurchases
+                    .filter((r: any) => !r.is_paid && r.dealer_id === d.id)
+                    .reduce((s: number, r: any) => s + (Number(r.qty) * Number(r.rate_per_unit) - Number(r.amount_paid || 0)), 0);
+                  return (
+                    <tr key={d.id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="py-3 px-4 font-bold text-gray-800">{d.name}</td>
+                      <td className="py-3 px-4 font-mono text-xs">{d.gstin}</td>
+                      <td className="py-3 px-4 text-gray-600">{d.phone}</td>
+                      <td className="py-3 px-4">
+                        {dealerOutstanding > 0
+                          ? <span className="text-red-600 font-bold text-xs">₹{dealerOutstanding.toFixed(2)}</span>
+                          : <span className="text-green-600 text-xs font-semibold">Cleared</span>}
+                      </td>
+                      <td className="py-3 px-4">
+                        {!isReadOnly && <button onClick={() => handleDeleteDealer(d.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {dealers.length === 0 && <tr><td colSpan={5} className="py-8 text-center text-gray-500 italic">No dealers registered.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -364,10 +553,11 @@ export default function DealerExpenses() {
                   <th className="py-3 px-4">Amount</th>
                   <th className="py-3 px-4">Dealer / Employee</th>
                   <th className="py-3 px-4">Description</th>
+                  {!isReadOnly && <th className="py-3 px-4"></th>}
                 </tr>
               </thead>
               <tbody>
-                {expenses.map((e) => (
+                {filteredExpenses.map((e) => (
                   <tr key={e.id} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-3 px-4 text-gray-500 text-xs">{new Date(e.expense_date || Date.now()).toLocaleDateString()}</td>
                     <td className="py-3 px-4 font-mono text-xs"><span className="bg-gray-100 px-2 py-1 rounded">{expenseCodeLabel[e.expense_code] || e.expense_code}</span></td>
@@ -378,9 +568,17 @@ export default function DealerExpenses() {
                         : dealers.find(d => d.id === e.dealer_id)?.name || "—"}
                     </td>
                     <td className="py-3 px-4 text-gray-400 text-xs">{e.description || "—"}</td>
+                    {!isReadOnly && (
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => openEditExpense(e)} className="text-blue-400 hover:text-blue-600"><Edit2 size={14} /></button>
+                          <button onClick={() => setDeleteExpenseId(e.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
-                {expenses.length === 0 && <tr><td colSpan={5} className="py-8 text-center text-gray-500 italic">No expenses recorded.</td></tr>}
+                {expenses.length === 0 && <tr><td colSpan={6} className="py-8 text-center text-gray-500 italic">No expenses recorded.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -503,7 +701,6 @@ export default function DealerExpenses() {
                 <label className="text-xs font-semibold text-gray-600 uppercase">Expense Category</label>
                 <select value={expenseForm.expense_code} onChange={e => setExpenseForm(p => ({ ...p, expense_code: e.target.value, dealer_id: "" }))}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
-                  <option value="EXP_RAW_MATERIAL">Raw Material (EXP_RAW_MATERIAL)</option>
                   <option value="EXP_SALARY_DRAW">Salary Draw (EXP_SALARY_DRAW)</option>
                   <option value="EXP_MISC_OPERATIONAL">Misc Operational (EXP_MISC_OPERATIONAL)</option>
                 </select>
@@ -520,16 +717,6 @@ export default function DealerExpenses() {
                   </select>
                 </div>
               )}
-              {expenseForm.expense_code === "EXP_RAW_MATERIAL" && (
-                <div>
-                  <label className="text-xs font-semibold text-gray-600 uppercase">Linked Dealer <span className="text-red-500">*</span></label>
-                  <select required value={expenseForm.dealer_id} onChange={e => setExpenseForm(p => ({ ...p, dealer_id: e.target.value }))}
-                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
-                    <option value="">— Select Dealer —</option>
-                    {dealers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </select>
-                </div>
-              )}
               <div>
                 <label className="text-xs font-semibold text-gray-600 uppercase">Amount (₹)</label>
                 <input type="number" min="0.01" step="0.01" required value={expenseForm.amount} onChange={e => setExpenseForm(p => ({ ...p, amount: e.target.value }))}
@@ -542,6 +729,187 @@ export default function DealerExpenses() {
               </div>
               {expenseError && <p className="text-red-500 text-sm">{expenseError}</p>}
               <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">Log Expense</button>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Edit Expense Modal */}
+      {editExpense && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl">
+              <h3 className="font-bold text-maroon text-lg">Edit Expense</h3>
+              <button onClick={() => setEditExpense(null)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+            </div>
+            <form onSubmit={handleEditExpense} className="p-5 space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Expense Category</label>
+                <select value={editExpenseForm.expense_code} onChange={e => setEditExpenseForm(p => ({ ...p, expense_code: e.target.value, dealer_id: "" }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
+                  <option value="EXP_SALARY_DRAW">Salary Draw</option>
+                  <option value="EXP_MISC_OPERATIONAL">Misc Operational</option>
+                </select>
+              </div>
+              {editExpenseForm.expense_code === "EXP_SALARY_DRAW" && (
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">Employee <span className="text-red-500">*</span></label>
+                  <select required value={editExpenseForm.dealer_id} onChange={e => setEditExpenseForm(p => ({ ...p, dealer_id: e.target.value }))}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
+                    <option value="">— Select Employee —</option>
+                    {employees.map(e => <option key={e.id} value={e.id}>{e.full_name || e.name} ({e.designation_tag})</option>)}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Amount (₹)</label>
+                <input type="number" min="0.01" step="0.01" required value={editExpenseForm.amount}
+                  onChange={e => setEditExpenseForm(p => ({ ...p, amount: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Description</label>
+                <input type="text" value={editExpenseForm.description}
+                  onChange={e => setEditExpenseForm(p => ({ ...p, description: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              {editExpenseError && <p className="text-red-500 text-sm">{editExpenseError}</p>}
+              <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors">Save Changes</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Expense Confirm */}
+      {deleteExpenseId && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <h3 className="font-bold text-gray-800 text-lg">Delete this expense?</h3>
+            <p className="text-sm text-gray-500">This action cannot be undone.</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setDeleteExpenseId(null)} className="px-4 py-2 rounded border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+              <button onClick={handleDeleteExpense} className="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-sm font-semibold">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Method Modal */}
+      {payModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl">
+              <h3 className="font-bold text-maroon text-lg">Record Payment</h3>
+              <button onClick={() => setPayModal(null)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-gray-600">Due: <span className="font-bold text-gray-800">₹{payModal.totalAmount.toFixed(2)}</span></p>
+
+              {/* Full / Partial toggle */}
+              <div>
+                <p className="text-xs font-semibold text-gray-600 uppercase mb-2">Payment Type</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => setPayType("full")}
+                    className={`py-2 rounded-lg border-2 text-sm font-bold transition-colors ${
+                      payType === "full" ? "border-green-500 bg-green-50 text-green-700" : "border-gray-200 text-gray-500 hover:border-gray-300"
+                    }`}>Full Payment</button>
+                  <button onClick={() => setPayType("partial")}
+                    className={`py-2 rounded-lg border-2 text-sm font-bold transition-colors ${
+                      payType === "partial" ? "border-orange-500 bg-orange-50 text-orange-700" : "border-gray-200 text-gray-500 hover:border-gray-300"
+                    }`}>Partial Payment</button>
+                </div>
+              </div>
+
+              {payType === "partial" && (
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">Amount Paying Now (₹)</label>
+                  <input type="number" min="0.01" step="0.01" value={payPartial}
+                    onChange={e => setPayPartial(e.target.value)}
+                    placeholder={`Max ₹${payModal.totalAmount.toFixed(2)}`}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+                </div>
+              )}
+
+              <div>
+                <p className="text-xs font-semibold text-gray-600 uppercase mb-2">Payment Method</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => setPayMethod("cash")}
+                    className={`py-3 rounded-lg border-2 text-sm font-bold transition-colors ${
+                      payMethod === "cash" ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-gray-200 text-gray-500 hover:border-gray-300"
+                    }`}>
+                    💵 Cash
+                    <p className="text-xs font-normal mt-0.5">₹{cashBalance.toFixed(2)} avail.</p>
+                  </button>
+                  <button onClick={() => setPayMethod("online")}
+                    className={`py-3 rounded-lg border-2 text-sm font-bold transition-colors ${
+                      payMethod === "online" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500 hover:border-gray-300"
+                    }`}>
+                    🏦 Online
+                    <p className="text-xs font-normal mt-0.5">₹{accountBalance.toFixed(2)} avail.</p>
+                  </button>
+                </div>
+              </div>
+
+              {payError && <p className="text-red-500 text-sm">{payError}</p>}
+              <button onClick={handleMarkPaid}
+                className="w-full bg-green-600 text-white font-bold py-2.5 rounded hover:bg-green-700 transition-colors">
+                Confirm Payment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Already-Paid Payment Method Modal (on Log Purchase) */}
+      {rawPayModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl">
+              <h3 className="font-bold text-maroon text-lg">Select Payment Method</h3>
+              <button onClick={() => { setRawPayModal(null); setShowRawModal(true); }}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-gray-600">Total: <span className="font-bold text-gray-800">₹{(Number(rawPayModal.form.qty) * Number(rawPayModal.form.rate_per_unit)).toFixed(2)}</span></p>
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => setRawPayMethod("cash")}
+                  className={`py-3 rounded-lg border-2 text-sm font-bold transition-colors ${
+                    rawPayMethod === "cash" ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-gray-200 text-gray-500 hover:border-gray-300"
+                  }`}>
+                  💵 Cash
+                  <p className="text-xs font-normal mt-0.5">₹{cashBalance.toFixed(2)} avail.</p>
+                </button>
+                <button onClick={() => setRawPayMethod("online")}
+                  className={`py-3 rounded-lg border-2 text-sm font-bold transition-colors ${
+                    rawPayMethod === "online" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500 hover:border-gray-300"
+                  }`}>
+                  🏦 Online
+                  <p className="text-xs font-normal mt-0.5">₹{accountBalance.toFixed(2)} avail.</p>
+                </button>
+              </div>
+              {rawPayError && <p className="text-red-500 text-sm">{rawPayError}</p>}
+              <button onClick={handleConfirmRawPay} className="w-full bg-green-600 text-white font-bold py-2.5 rounded hover:bg-green-700 transition-colors">
+                Confirm &amp; Log Purchase
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Top-up Modal */}
+      {topupModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl">
+              <h3 className="font-bold text-maroon text-lg">Add {topupModal === "cash" ? "Cash" : "Account"} Balance</h3>
+              <button onClick={() => setTopupModal(null)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+            </div>
+            <form onSubmit={handleTopup} className="p-5 space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Amount (₹)</label>
+                <input type="number" min="0.01" step="0.01" required value={topupAmount}
+                  onChange={e => setTopupAmount(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors">Add Balance</button>
             </form>
           </div>
         </div>

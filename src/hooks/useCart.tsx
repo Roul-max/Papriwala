@@ -59,6 +59,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addToCart = async (product: any, size?: string, quantity: number = 1) => {
+    if (product.current_stock_qty <= 0) return;
     if (!size) {
       const productVariants = dbVariants.filter((v: any) => v.product_id === product.id);
       if (productVariants.length > 0) {
@@ -80,8 +81,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     const cartItemId = `${product.id}-${size}`;
     setItems(prev => {
       const existing = prev.find(i => i.id === cartItemId);
-      if (existing) return prev.map(i => i.id === cartItemId ? { ...i, qty: i.qty + quantity } : i);
-    return [...prev, { id: cartItemId, product_id: product.id, name: product.name, size: size!, price: finalPrice, qty: quantity, unit: product.unit || "pcs", image: product.image }];
+      const currentQty = existing?.qty || 0;
+      const newQty = Math.min(currentQty + quantity, product.current_stock_qty);
+      if (existing) return prev.map(i => i.id === cartItemId ? { ...i, qty: newQty } : i);
+      return [...prev, { id: cartItemId, product_id: product.id, name: product.name, size: size!, price: finalPrice, qty: newQty, unit: product.unit || "pcs", image: product.image, stock: product.current_stock_qty }];
     });
     showToast(product.name, product.image);
   };
@@ -89,22 +92,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const handleModalConfirm = () => {
     const variant = variants.find(v => v.size_label === selectedSize);
     const cartItemId = `${selectedProduct.id}-${selectedSize}`;
-    
+    const existing = items.find(i => i.id === cartItemId);
+    const currentQty = existing?.qty || 0;
+    const maxQty = selectedProduct.current_stock_qty ?? Infinity;
+    if (currentQty + qty > maxQty) {
+      alert(`Only ${maxQty} available for "${selectedProduct.name}".`);
+      return;
+    }
     setItems(prev => {
-      const existing = prev.find(i => i.id === cartItemId);
-      if (existing) {
-        return prev.map(i => i.id === cartItemId ? { ...i, qty: i.qty + qty } : i);
-      }
-      return [...prev, {
-        id: cartItemId,
-        product_id: selectedProduct.id,
-        name: selectedProduct.name,
-        size: selectedSize,
-        price: variant.price,
-        qty: qty,
-        unit: selectedProduct.unit || "pcs",
-        image: selectedProduct.image
-      }];
+      const ex = prev.find(i => i.id === cartItemId);
+      if (ex) return prev.map(i => i.id === cartItemId ? { ...i, qty: i.qty + qty } : i);
+      return [...prev, { id: cartItemId, product_id: selectedProduct.id, name: selectedProduct.name, size: selectedSize, price: variant.price, qty, unit: selectedProduct.unit || "pcs", image: selectedProduct.image, stock: maxQty } as any];
     });
     showToast(selectedProduct.name, selectedProduct.image);
     setShowModal(false);
@@ -115,7 +113,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateQty = (id: string, delta: number) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, qty: Math.max(1, i.qty + delta) } : i));
+    setItems(prev => prev.map(i => {
+      if (i.id !== id) return i;
+      const maxQty = (i as any).stock ?? Infinity;
+      return { ...i, qty: Math.min(maxQty, Math.max(1, i.qty + delta)) };
+    }));
   };
 
   const updateNote = (id: string, note: string) => {

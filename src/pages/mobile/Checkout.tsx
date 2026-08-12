@@ -9,41 +9,65 @@ export default function Checkout() {
   const { total, items, clearCart } = useCart();
   const [method, setMethod] = useState("upi");
   const [success, setSuccess] = useState(false);
+  const [orderError, setOrderError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  // §3.1 — Extract table_id from QR URL params, fall back to sessionStorage set at scan time
+  const isGuest = localStorage.getItem("guestBrowse") === "true" && !localStorage.getItem("customerToken");
+
   const urlParams = new URLSearchParams(window.location.search);
   const tableId = urlParams.get("table_id") || sessionStorage.getItem("qr_table_id") || "Counter";
 
+  if (isGuest) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full bg-cream-light p-6 text-center pb-20">
+        <p className="text-gray-600 mb-4 font-semibold">Please sign in with your phone number to place an order.</p>
+        <button onClick={() => navigate("/login")} className="w-full bg-maroon text-cream font-bold py-4 rounded-xl hover:bg-maroon-light transition-colors shadow-md text-lg">
+          Sign In
+        </button>
+      </div>
+    );
+  }
+
   const handlePlaceOrder = async () => {
     if (items.length === 0) return;
-    const isCash = method === "cash";
-    const isUPI = method === "upi";
+    setOrderError("");
+    setLoading(true);
 
-    // §3.5 UPI deep-link for digital payments
-    if (isUPI) {
+    if (method === "upi") {
       const upiUrl = `upi://pay?pa=papriwale@upi&pn=Papriwale&am=${total.toFixed(2)}&cu=INR&tn=TableOrder`;
       window.location.href = upiUrl;
-      // Small delay to allow UPI app to open before placing order
       await new Promise(r => setTimeout(r, 1500));
     }
-    const customerId = localStorage.getItem("customerId") || null;
-    await apiFetch("/api/orders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        table_id: tableId,
-        grand_total: total,
-        order_status: isCash ? "Pending" : "Paid",
-        order_source: "QR Table Menu",
-        payment_method: method,
-        customer_id: customerId,
-        items: items.map(i => ({ name: i.name, size: i.size, price: i.price, qty: i.qty, unit: i.unit || "pcs", note: i.note || "" })),
-        tax_collected: (total / 1.05 * 0.05),
-      })
-    });
 
-    clearCart();
-    setSuccess(true);
+    try {
+      const res = await apiFetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          table_id: tableId,
+          grand_total: total,
+          order_status: method === "cash" ? "Pending" : "Paid",
+          order_source: "QR Table Menu",
+          payment_method: method,
+          customer_id: localStorage.getItem("customerId") || null,
+          items: items.map(i => ({ name: i.name, size: i.size, price: i.price, qty: i.qty, unit: i.unit || "pcs", note: i.note || "" })),
+          tax_collected: (total / 1.05 * 0.05),
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setOrderError(data.items?.length
+          ? `Not enough stock: ${data.items.join(", ")}`
+          : (data.error || "Failed to place order. Please try again."));
+        return;
+      }
+
+      clearCart();
+      setSuccess(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (success) {
@@ -87,14 +111,20 @@ export default function Checkout() {
         </div>
       </div>
 
-      <div className="fixed bottom-[64px] left-0 right-0 max-w-md mx-auto p-4 bg-white border-t border-gray-100 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-30 flex items-center justify-between">
-        <div className="flex flex-col">
-          <span className="text-xs text-gray-500 uppercase font-bold tracking-wider">Total to pay</span>
-          <span className="text-xl font-bold text-maroon">₹{total.toFixed(2)}</span>
+      <div className="fixed bottom-[64px] left-0 right-0 max-w-md mx-auto p-4 bg-white border-t border-gray-100 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-30">
+        {orderError && (
+          <p className="text-red-600 text-sm font-semibold mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{orderError}</p>
+        )}
+        <div className="flex items-center justify-between">
+          <div className="flex flex-col">
+            <span className="text-xs text-gray-500 uppercase font-bold tracking-wider">Total to pay</span>
+            <span className="text-xl font-bold text-maroon">₹{total.toFixed(2)}</span>
+          </div>
+          <button onClick={handlePlaceOrder} disabled={loading}
+            className="bg-maroon text-cream font-bold px-8 py-3.5 rounded-xl hover:bg-maroon-light transition-colors shadow-md text-lg disabled:opacity-60">
+            {loading ? "Placing..." : "Place Order"}
+          </button>
         </div>
-        <button onClick={handlePlaceOrder} className="bg-maroon text-cream font-bold px-8 py-3.5 rounded-xl hover:bg-maroon-light transition-colors shadow-md text-lg">
-          Place Order
-        </button>
       </div>
     </div>
   );

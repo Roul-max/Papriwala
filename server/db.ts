@@ -41,6 +41,8 @@ export const db: any = {
   guest_customers: [] as any[],
   adminPasswordHash: "",
   settings: {
+    cashBalance: 0,
+    accountBalance: 0,
     permissions: {
       Cashier:  { "POS Billing": "Full Access", Orders: "Read-Only",  Inventory: "Hidden",      "Financial Reports": "Hidden",    Settings: "Hidden", Employees: "Hidden" },
       Chef:     { "POS Billing": "Hidden",      Orders: "Full Access", Inventory: "Read-Only",   "Financial Reports": "Hidden",    Settings: "Hidden", Employees: "Hidden" },

@@ -96,6 +96,7 @@ export default function POS() {
   const categories = ["All", ...Array.from(new Set(products.map(p => p.category)))];
 
   const handleAddToBill = (product: any) => {
+    if (product.current_stock_qty <= 0) return;
     const productVariants = allVariants.filter(v => v.product_id === product.id);
     if (productVariants.length > 0) {
       setVariantModal({ product, variants: productVariants });
@@ -118,6 +119,11 @@ export default function POS() {
       return v ? variantModal.product.price * v.variant_price_modifier : variantModal.product.price;
     })();
     const key = `${variantModal.product.id}-${variantSize}`;
+    const alreadyInCart = cart.find(item => item.id === key)?.qty || 0;
+    if (alreadyInCart + variantQty > variantModal.product.current_stock_qty) {
+      alert(`Only ${variantModal.product.current_stock_qty} ${variantUnit || "pcs"} available for "${variantModal.product.name}".`);
+      return;
+    }
     setCart(prev => {
       const existing = prev.find(item => item.id === key);
       if (existing) return prev.map(item => item.id === key ? { ...item, qty: item.qty + variantQty, price: finalPrice } : item);
@@ -134,6 +140,12 @@ export default function POS() {
       ? (quickQty !== "" ? Number(quickQty) : quickAmount !== "" ? parseFloat((Number(quickAmount) / p.price).toFixed(3)) : 0)
       : (quickQty !== "" ? Number(quickQty) : 0);
     if (!finalQty || finalQty <= 0) return;
+    const alreadyInCart = cart.find(item => item.id === p.id)?.qty || 0;
+    const totalRequested = alreadyInCart + finalQty;
+    if (totalRequested > p.current_stock_qty) {
+      alert(`Only ${p.current_stock_qty} ${p.unit || "pcs"} available for "${p.name}".`);
+      return;
+    }
     setCart(prev => {
       const existing = prev.find(item => item.id === p.id);
       if (existing) return prev.map(item => item.id === p.id ? { ...item, qty: item.qty + finalQty } : item);
@@ -149,7 +161,15 @@ export default function POS() {
   };
 
   const updateCartQty = (id: string, qty: number) => {
-    setCart(prev => prev.map(item => item.id === id ? { ...item, qty: Math.max(0.01, qty) } : item));
+    setCart(prev => prev.map(item => {
+      if (item.id !== id) return item;
+      const productId = item.product_id || item.id;
+      const product = products.find((p: any) => p.id === productId);
+      const maxQty = product?.current_stock_qty ?? Infinity;
+      const clamped = Math.min(Math.max(0.01, qty), maxQty);
+      if (qty > maxQty) alert(`Only ${maxQty} ${item.unit || "pcs"} available for "${item.name}".`);
+      return { ...item, qty: clamped };
+    }));
   };
 
   const updateCartUnit = (id: string, unit: string) => {
@@ -394,7 +414,14 @@ export default function POS() {
     e.preventDefault();
     if (!customerPhone || customerPhone.length !== 10) return;
     const msg = encodeURIComponent(`Your invoice ${invoiceNo} total: ₹${grandTotal.toFixed(2)}. Thank you for visiting Papriwale!`);
-    window.open(`https://wa.me/91${customerPhone}?text=${msg}`, "_blank");
+    const url = `https://wa.me/91${customerPhone}?text=${msg}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
     setShowWhatsAppModal(false);
     setCustomerPhone("");
   };
@@ -402,13 +429,21 @@ export default function POS() {
   const handlePlaceAndPrint = async () => {
     if (cart.length === 0) return;
     const createdBy = localStorage.getItem("adminName") || "Admin";
-    await apiFetch("/api/orders", {
+    const res = await apiFetch("/api/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: paymentMode, items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, created_by: createdBy })
     });
-    handlePrint();          // main bill for client
-    printSubBills(invoiceNo); // sub bills per category for staff
+    if (!res.ok) {
+      const data = await res.json();
+      const msg = data.items?.length
+        ? `Not enough stock:\n${data.items.join("\n")}`
+        : (data.error || "Failed to place order.");
+      alert(msg);
+      return;
+    }
+    handlePrint();
+    printSubBills(invoiceNo);
     setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
     generateInvoiceNo();
     refreshAnalytics();
@@ -506,12 +541,19 @@ export default function POS() {
                     <td className="py-3 px-4">{p.unit === "gm" ? (p.current_stock_qty / 1000).toFixed(2) : p.current_stock_qty} <span className="text-xs text-gray-400">{p.unit === "gm" ? "kg" : (p.unit || "pcs")}</span></td>
                     <td className="py-3 px-4">₹{p.unit === "gm" ? (p.price * 1000).toFixed(0) : p.price}<span className="text-xs text-gray-400">/{p.unit === "gm" ? "kg" : (p.unit || "pc")}</span></td>
                     <td className="py-3 px-4">
-                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${p.current_stock_qty > p.safety_low_threshold ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                        {p.current_stock_qty > p.safety_low_threshold ? "In Stock" : "Low Stock"}
+                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${
+                        p.current_stock_qty <= 0 ? "bg-red-100 text-red-700" :
+                        p.current_stock_qty <= p.safety_low_threshold ? "bg-yellow-100 text-yellow-700" :
+                        "bg-green-100 text-green-700"
+                      }`}>
+                        {p.current_stock_qty <= 0 ? "Out of Stock" : p.current_stock_qty <= p.safety_low_threshold ? "Low Stock" : "In Stock"}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <button onClick={() => handleAddToBill(p)} className="text-maroon hover:bg-maroon hover:text-white p-1.5 rounded transition-colors border border-maroon">
+                      <button
+                        onClick={() => handleAddToBill(p)}
+                        disabled={p.current_stock_qty <= 0}
+                        className="text-maroon hover:bg-maroon hover:text-white p-1.5 rounded transition-colors border border-maroon disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-maroon">
                         <Plus size={16} />
                       </button>
                     </td>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ChevronDown, ChevronUp, Check, Clock, MessageCircle, EyeOff, Filter, Printer, Edit2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Check, Clock, MessageCircle, EyeOff, Filter, Printer, Trash2, X } from "lucide-react";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
 
@@ -114,8 +114,7 @@ export default function AdminOrders() {
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
   const [filterFrom,  setFilterFrom]  = useState("");
   const [filterTo,    setFilterTo]    = useState("");
-  const [editOrder,   setEditOrder]   = useState<Order | null>(null);
-  const [editItems,   setEditItems]   = useState<OrderItem[]>([]);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const access     = useAccess("Orders");
   const isReadOnly = access === "Read-Only";
@@ -144,21 +143,12 @@ export default function AdminOrders() {
     fetchAnalytics();
   };
 
-  const openEdit = (order: Order) => {
-    setEditOrder({ ...order });
-    setEditItems(JSON.parse(JSON.stringify(order.items || [])));
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editOrder) return;
-    const newGrandTotal = editItems.reduce((s, it) => s + it.price * it.qty, 0);
-    await apiFetch(`/api/orders/${editOrder.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: editItems, grand_total: newGrandTotal, payment_mode: editOrder.payment_mode }),
-    });
-    setEditOrder(null);
+  const handleDelete = async () => {
+    if (!deleteId) return;
+    await apiFetch(`/api/orders/${deleteId}`, { method: "DELETE" });
+    setDeleteId(null);
     fetchOrders();
+    fetchAnalytics();
   };
 
   const filteredOrders = orders
@@ -253,9 +243,9 @@ export default function AdminOrders() {
                   <Printer size={13} /> Print
                 </button>
                 {!isReadOnly && (
-                  <button onClick={() => openEdit(order)}
-                    className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1">
-                    <Edit2 size={13} /> Edit
+                  <button onClick={() => setDeleteId(order.id)}
+                    className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1">
+                    <Trash2 size={13} /> Delete
                   </button>
                 )}
 
@@ -337,53 +327,15 @@ export default function AdminOrders() {
         ))}
       </div>
 
-      {/* Edit Order Modal */}
-      {editOrder && (
+      {/* Delete Confirm Modal */}
+      {deleteId && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 sticky top-0">
-              <h3 className="font-bold text-maroon text-lg">Edit Order #{editOrder.id}</h3>
-              <button onClick={() => setEditOrder(null)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
-            </div>
-            <div className="p-5 space-y-3">
-              {editItems.map((item, idx) => (
-                <div key={idx} className="grid grid-cols-4 gap-2 items-center text-sm">
-                  <span className="font-medium text-gray-800 truncate">{item.name}</span>
-                  <div>
-                    <label className="text-[10px] text-gray-400 uppercase">Unit</label>
-                    <input type="text" value={item.unit || "pcs"}
-                      onChange={e => { const c = [...editItems]; c[idx].unit = e.target.value; setEditItems(c); }}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 uppercase">Price ₹</label>
-                    <input type="number" min="0" step="0.01" value={item.price}
-                      onChange={e => { const c = [...editItems]; c[idx].price = Number(e.target.value); setEditItems(c); }}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 uppercase">Qty</label>
-                    <input type="number" min="1" step="0.01" value={item.qty}
-                      onChange={e => { const c = [...editItems]; c[idx].qty = Number(e.target.value); setEditItems(c); }}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
-                  </div>
-                </div>
-              ))}
-              <div>
-                <label className="text-xs font-semibold text-gray-600 uppercase">Payment Mode</label>
-                <select value={editOrder.payment_mode || "Cash"}
-                  onChange={e => setEditOrder({ ...editOrder, payment_mode: e.target.value })}
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 bg-white">
-                  {["Cash", "UPI", "Card"].map(m => <option key={m}>{m}</option>)}
-                </select>
-              </div>
-              <div className="flex justify-between text-sm font-bold text-maroon border-t pt-2">
-                <span>New Total</span>
-                <span>₹{editItems.reduce((s, it) => s + it.price * it.qty, 0).toFixed(2)}</span>
-              </div>
-              <button onClick={handleSaveEdit} className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors">
-                Save Changes
-              </button>
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <h3 className="font-bold text-gray-800 text-lg">Delete Order #{deleteId}?</h3>
+            <p className="text-sm text-gray-500">This action cannot be undone.</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setDeleteId(null)} className="px-4 py-2 rounded border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+              <button onClick={handleDelete} className="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-sm font-semibold">Delete</button>
             </div>
           </div>
         </div>

@@ -1,9 +1,9 @@
 import { Outlet, Link, useLocation, Navigate, useNavigate } from "react-router-dom";
 import {
   Search, Bell, Settings, User, ShoppingCart, Package, List,
-  Users, FileText, Star, AlertTriangle, X, ExternalLink, LayoutDashboard,
+  Users, FileText, Star, AlertTriangle, X, ExternalLink, LayoutDashboard, Printer,
 } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { apiFetch } from "../lib/apiFetch";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -65,6 +65,7 @@ export default function AdminLayout() {
   const [avatar,             setAvatar]             = useState<string | null>(null);
   const [inventoryDepleted,  setInventoryDepleted]  = useState(false);
   const [dealerInvoiceModal, setDealerInvoiceModal] = useState<DealerInvoiceModal | null>(null);
+  const [qrOrderMap,         setQrOrderMap]         = useState<Record<string, any>>({});
 
   const notifRef  = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -153,7 +154,13 @@ export default function AdminLayout() {
         try {
           const { type, payload } = JSON.parse(event.data);
           if (type === "INBOUND_QR_ORDER") {
-            addNotif(`New QR Order #${payload.order_id}`, `Table ${payload.table_number} • ₹${payload.bill_amount}`, "info");
+            const nid = Math.random().toString();
+            const n: Notification = { id: nid, title: `New QR Order #${payload.order_id}`, description: `Table ${payload.table_number} • ₹${payload.bill_amount}`, notif_type: "info", read: false, created_at: new Date().toISOString() };
+            setNotifications(prev => [n, ...prev]);
+            setUnreadCount(prev => prev + 1);
+            setBadgeFlash(true);
+            setTimeout(() => setBadgeFlash(false), 700);
+            setQrOrderMap(prev => ({ ...prev, [nid]: payload }));
             audioRef.current?.play().catch(() => {});
           }
           if (type === "INVENTORY_DEPLETED") {
@@ -171,6 +178,9 @@ export default function AdminLayout() {
           }
           if (type === "PAYMENT_OVERDUE") {
             addNotif(`🚨 Payment Overdue: ${payload.material_name}`, `₹${payload.amount} was due on ${payload.due_date} — Dealer: ${payload.dealer_name}`, "error");
+          }
+          if (type === "NEW_REVIEW") {
+            window.dispatchEvent(new Event("new-review"));
           }
         } catch {}
       };
@@ -235,22 +245,53 @@ export default function AdminLayout() {
   const handleLogout = () => {
     const token = localStorage.getItem("sessionToken") || "";
     if (token) apiFetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token } }).catch(() => {});
-    ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
     sessionStorage.clear();
-    setNotifications([]);
-    setUnreadCount(0);
-    setSearchQuery("");
-    setSearchResults(null);
+    // Clear after replace so React doesn't re-render with missing auth
     window.location.replace("/admin/login");
+    ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
   };
 
   const handleClearNotifs = () => {
     apiFetch("/api/notifications", { method: "DELETE" }).catch(() => {});
     setNotifications([]);
     setUnreadCount(0);
+    setQrOrderMap({});
   };
 
-  if (isMobile) return <Navigate to="/" replace />;
+  const printQrOrder = useCallback(async (orderId: string) => {
+    const res = await apiFetch(`/api/orders`);
+    const all = await res.json();
+    const order = (Array.isArray(all) ? all : []).find((o: any) => o.id === orderId);
+    if (!order) return;
+    const w = window.open("", "", "width=400,height=600");
+    if (!w) return;
+    w.document.write(`<html><head><title>Order ${order.id}</title><style>
+      body{font-family:monospace;padding:16px;font-size:13px}
+      h2{text-align:center;margin:0 0 4px}p{margin:2px 0;text-align:center}
+      table{width:100%;border-collapse:collapse;margin-top:10px}
+      td{padding:3px 0}hr{border:none;border-top:1px dashed #000;margin:8px 0}
+      .right{text-align:right}.bold{font-weight:bold}
+    </style></head><body>
+      <h2>SHRI BADRINARAYAN</h2><p>Papriwale</p><hr/>
+      <p>Order: <b>${order.id}</b></p>
+      <p>Table: ${order.table_id || "Delivery"} | ${new Date(order.timestamp).toLocaleString()}</p><hr/>
+      <table>${(order.items || []).map((i: any) => `<tr><td>${i.name}</td><td>x${i.qty}</td><td class="right">₹${(i.price * i.qty).toFixed(2)}</td></tr>`).join("")}</table><hr/>
+      <p class="bold">Total: ₹${order.grand_total}</p>
+      <p>Payment: ${order.payment_method || "—"}</p><hr/>
+      <p>Thank you!</p>
+    </body></html>`);
+    w.document.close();
+    setTimeout(() => { w.print(); w.close(); }, 300);
+  }, []);
+
+  if (isMobile) return (
+    <div className="flex items-center justify-center h-screen bg-gray-100 p-6">
+      <div className="text-center">
+        <p className="text-gray-600 font-semibold">Admin portal is not available on mobile.</p>
+        <p className="text-gray-400 text-sm mt-1">Please use a desktop or laptop browser.</p>
+      </div>
+    </div>
+  );
 
   const isEmployee = role !== "Admin";
   const navItems = isEmployee ? [] : ALL_NAV_ITEMS.filter(item => item.module === null || canSee(item.module));
@@ -340,16 +381,29 @@ export default function AdminLayout() {
                   <div className="max-h-64 overflow-y-auto">
                     {notifications.length === 0 ? (
                       <div className="p-4 text-center text-gray-500 text-sm">No notifications</div>
-                    ) : notifications.map(notif => (
-                      <div key={notif.id} className="p-3 border-b border-gray-50 hover:bg-gray-50">
-                        <p className={`text-sm font-semibold ${
-                          notif.notif_type === "error"   ? "text-red-600"   :
-                          notif.notif_type === "warning" ? "text-amber-600" : "text-gray-800"
-                        }`}>{notif.title}</p>
-                        <p className="text-xs text-gray-600">{notif.description}</p>
-                        <span className="text-[10px] text-gray-400 mt-1 block">{new Date(notif.created_at).toLocaleString()}</span>
-                      </div>
-                    ))}
+                    ) : notifications.map(notif => {
+                      const qrPayload = qrOrderMap[notif.id];
+                      return (
+                        <div key={notif.id} className="p-3 border-b border-gray-50 hover:bg-gray-50">
+                          <p className={`text-sm font-semibold ${
+                            notif.notif_type === "error"   ? "text-red-600"   :
+                            notif.notif_type === "warning" ? "text-amber-600" : "text-gray-800"
+                          }`}>{notif.title}</p>
+                          <p className="text-xs text-gray-600">{notif.description}</p>
+                          <div className="flex items-center justify-between mt-1">
+                            <span className="text-[10px] text-gray-400">{new Date(notif.created_at).toLocaleString()}</span>
+                            {qrPayload && (
+                              <button
+                                onClick={() => printQrOrder(qrPayload.order_id)}
+                                className="flex items-center gap-1 text-[11px] font-semibold text-maroon hover:text-maroon-light bg-maroon/10 hover:bg-maroon/20 px-2 py-0.5 rounded transition-colors"
+                              >
+                                <Printer size={11} /> Print
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className="p-2 text-center border-t border-gray-100 bg-gray-50">
                     <button onClick={handleClearNotifs} className="text-xs font-semibold text-maroon hover:text-maroon-light">

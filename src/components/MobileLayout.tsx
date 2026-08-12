@@ -1,4 +1,4 @@
-import { Outlet, Link, useLocation, Navigate } from "react-router-dom";
+import { Outlet, Link, useLocation } from "react-router-dom";
 import { Home, Grid, ShoppingBag, User, Menu, X, FileText } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useCart } from "../hooks/useCart";
@@ -34,7 +34,15 @@ export default function MobileLayout() {
     };
   }, []);
 
-  if (isDesktop) return <Navigate to="/admin/login" replace />;
+  if (isDesktop) return (
+    <div className="flex items-center justify-center h-screen bg-gray-100">
+      <div className="text-center">
+        <p className="text-gray-500 text-lg font-semibold">Please open on a mobile device</p>
+        <p className="text-gray-400 text-sm mt-1">or use browser mobile view (F12)</p>
+        <a href="/admin/login" className="mt-4 inline-block text-maroon font-bold underline text-sm">Go to Admin Portal →</a>
+      </div>
+    </div>
+  );
 
   return (
     <div className="mobile-portal flex flex-col h-screen w-full max-w-md mx-auto bg-cream-light font-sans relative overflow-hidden shadow-2xl sm:border-x sm:border-gray-200" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
