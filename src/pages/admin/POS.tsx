@@ -181,10 +181,10 @@ export default function POS() {
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
   const clampedFlat = Math.min(Math.max(0, discountFlat), subtotal);
   const clampedPercent = Math.min(Math.max(0, discountPercent), 100);
-  // Only one discount mode active at a time — flat takes precedence when typed
   const discountTotal = discountFlat > 0 ? clampedFlat : subtotal * (clampedPercent / 100);
+  // Tax is informational only — NOT added to grand total
   const taxes = (subtotal - discountTotal) * 0.05;
-  const grandTotal = Math.max(0, (subtotal - discountTotal) + taxes + otherCharges);
+  const grandTotal = Math.max(0, (subtotal - discountTotal) + otherCharges);
 
 
   const handleExportPDF = () => {
@@ -268,9 +268,9 @@ export default function POS() {
     y += 10;
     if (discountTotal > 0) { doc.text(`Discount:`, lx, y); doc.text(`-Rs.${discountTotal.toFixed(2)}`, rx, y, { align: "right" }); y += 10; }
     if (otherCharges > 0) { doc.text(`Other Charges:`, lx, y); doc.text(`Rs.${otherCharges.toFixed(2)}`, rx, y, { align: "right" }); y += 10; }
-    doc.text(`Tax (5%):`, lx, y); doc.text(`Rs.${taxes.toFixed(2)}`, rx, y, { align: "right" }); y += 10;
+    doc.text(`Tax 5% (incl.):`, lx, y); doc.text(`Rs.${taxes.toFixed(2)}`, rx, y, { align: "right" }); y += 10;
     doc.setFont("courier", "italic"); doc.setFontSize(6.5);
-    doc.text("[ Net Total Inclusive of GST ]", cx, y, { align: "center" }); y += 10;
+    doc.text("[ Tax included in price, not added ]", cx, y, { align: "center" }); y += 10;
     divider();
 
     // Grand Total
@@ -399,8 +399,8 @@ export default function POS() {
       ${dash}
       <div class="row"><span>Total Qty: ${totalQty}</span><span>Sub Total: ${subtotal.toFixed(2)}</span></div>
       ${discountRow}${otherRow}
-      <div class="row"><span>Tax (5%)</span><span>&#8377;${taxes.toFixed(2)}</span></div>
-      <div class="sub" style="margin:2px 0">[ Net Total Inclusive of GST ]</div>
+      <div class="row"><span>Tax (5%) incl.</span><span>&#8377;${taxes.toFixed(2)}</span></div>
+      <div class="sub" style="margin:2px 0">[ Tax included in price, not added ]</div>
       ${dash}
       <div class="grand"><span>Grand Total</span><span>&#x20B9;${grandTotal.toFixed(2)}</span></div>
       <div class="sub" style="margin:2px 0">Paid via: ${paymentMode}</div>

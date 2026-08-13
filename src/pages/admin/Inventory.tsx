@@ -5,11 +5,12 @@ import { apiFetch } from "../../lib/apiFetch";
 type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; muted?: boolean; image?: string; unit?: string; description?: string; };
 type LogEntry = { id: string; type: "STOCK_IN" | "STOCK_OUT"; product_name: string; qty: number; reason: string; operator: string; timestamp: string; };
 
-const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs", image: "", description: "" };
+const EMPTY_PRODUCT = { name: "", sku: "", category: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "gm", image: "", description: "" };
 
 export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
   const [log, setLog] = useState<LogEntry[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("All Items");
   const [logTab, setLogTab] = useState("All");
   const [search, setSearch] = useState("");
@@ -35,11 +36,18 @@ export default function Inventory() {
   const fetchAll = () => {
     apiFetch("/api/products").then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : []));
     apiFetch("/api/inventory-log").then(r => r.json()).then(d => setLog(Array.isArray(d) ? d : []));
+    apiFetch("/api/categories").then(r => r.json()).then(d => setCategories(Array.isArray(d) ? d.map((c: any) => c.name) : []));
   };
 
   useEffect(() => { fetchAll(); }, []);
 
-  const categories = ["All", ...Array.from(new Set(products.map(p => p.category)))];
+  const categoryFilterOptions = ["All", ...categories];
+
+  const nextSku = () => {
+    const nums = products.map(p => parseInt(p.sku?.replace(/\D/g, "") || "0")).filter(n => !isNaN(n));
+    const next = nums.length ? Math.max(...nums) + 1 : 1;
+    return `SKU${String(next).padStart(3, "0")}`;
+  };
 
   const filtered = products.filter(p => {
     const matchTab = activeTab === "All Items" || (activeTab === "Low Stock" && p.current_stock_qty > 0 && p.current_stock_qty <= p.safety_low_threshold) || (activeTab === "Out of Stock" && p.current_stock_qty === 0);
@@ -76,21 +84,22 @@ export default function Inventory() {
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setAddError("");
-    if (!addForm.name || !addForm.sku || !addForm.category || !addForm.price) {
-      setAddError("All fields are required.");
+    if (!addForm.name || !addForm.category || !addForm.price) {
+      setAddError("Name, category and price are required.");
       return;
     }
+    const sku = addForm.sku || nextSku();
     if (editProductId) {
       await apiFetch(`/api/products/${editProductId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...addForm, unit_purchase_cost: Number(addForm.unit_purchase_cost), price: Number(addForm.price), current_stock_qty: Number(addForm.current_stock_qty), safety_low_threshold: Number(addForm.safety_low_threshold) })
+        body: JSON.stringify({ ...addForm, sku, price: Number(addForm.price), current_stock_qty: Number(addForm.current_stock_qty) || 0, safety_low_threshold: Number(addForm.safety_low_threshold) })
       });
     } else {
       await apiFetch("/api/products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...addForm, unit_purchase_cost: Number(addForm.unit_purchase_cost), price: Number(addForm.price), current_stock_qty: Number(addForm.current_stock_qty), safety_low_threshold: Number(addForm.safety_low_threshold) })
+        body: JSON.stringify({ ...addForm, sku, price: Number(addForm.price), current_stock_qty: Number(addForm.current_stock_qty) || 0, safety_low_threshold: Number(addForm.safety_low_threshold) })
       });
     }
     setShowAddModal(false);
@@ -173,7 +182,7 @@ export default function Inventory() {
               </span>
             )}
             {!isReadOnly && (
-              <button onClick={() => { setStockModal(null); setShowAddModal(true); }} className="bg-maroon hover:bg-maroon-light text-white px-4 py-2 rounded text-sm font-medium transition-colors flex items-center gap-1">
+              <button onClick={() => { setStockModal(null); setAddForm({ ...EMPTY_PRODUCT, sku: nextSku() }); setShowAddModal(true); }} className="bg-maroon hover:bg-maroon-light text-white px-4 py-2 rounded text-sm font-medium transition-colors flex items-center gap-1">
                 <Plus size={16} /> Add Product
               </button>
             )}
@@ -187,7 +196,7 @@ export default function Inventory() {
               className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded text-sm" />
           </div>
           <select value={catFilter} onChange={e => setCatFilter(e.target.value)} className="border border-gray-300 rounded px-3 py-2 text-sm bg-white min-w-[150px]">
-            {categories.map(c => <option key={c}>{c}</option>)}
+            {categoryFilterOptions.map(c => <option key={c}>{c}</option>)}
           </select>
         </div>
 
@@ -212,7 +221,7 @@ export default function Inventory() {
                   <td className="py-3 px-4 font-medium text-gray-800">
                     <div className="flex items-center gap-2">
                       {p.image
-                        ? <img src={p.image} alt={p.name} className="w-8 h-8 rounded object-cover border border-gray-200 flex-shrink-0" />
+                        ? <img src={p.image} alt={p.name} className="w-8 h-8 rounded object-cover border border-gray-200 flex-shrink-0" onError={e => { (e.target as HTMLImageElement).style.display='none'; }}/>
                         : <div className="w-8 h-8 rounded bg-gray-100 flex items-center justify-center flex-shrink-0"><Package size={14} className="text-gray-400" /></div>
                       }
                       {p.name}
@@ -231,15 +240,17 @@ export default function Inventory() {
                     </span>
                   </td>
                   <td className="py-3 px-4">
-                    {p.muted
-                      ? <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">🔕 Muted</span>
-                      : <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600">🔔 Active</span>}
+                      {p.muted
+                        ? <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">🔕 Muted</span>
+                        : p.current_stock_qty === 0
+                          ? <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-red-100 text-red-600">⚠ Depleted</span>
+                          : <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600">🔔 Active</span>}
                   </td>
                   <td className="py-3 px-4 text-right">
                     <div className="flex justify-end gap-1">
                       {!isReadOnly && (
                         <>
-                          <button onClick={() => { setEditProductId(p.id); setAddForm({ name: p.name, sku: p.sku, category: p.category, unit_purchase_cost: String(p.unit_purchase_cost), price: String(p.price), current_stock_qty: String(p.current_stock_qty), safety_low_threshold: String(p.safety_low_threshold), unit: p.unit || "pcs", image: p.image || "", description: p.description || "" }); setShowAddModal(true); }}
+                          <button onClick={() => { setEditProductId(p.id); setAddForm({ name: p.name, sku: p.sku, category: p.category, price: String(p.price), current_stock_qty: String(p.current_stock_qty), safety_low_threshold: String(p.safety_low_threshold), unit: p.unit || "gm", image: p.image || "", description: p.description || "" }); setShowAddModal(true); }}
                             className="text-blue-600 hover:bg-blue-50 p-1.5 rounded" title="Edit"><Edit2 size={16} /></button>
                           <button onClick={() => { setStockModal({ product: p, type: "in" }); setStockQty(""); setStockReason(""); setStockError(""); }}
                             className="text-green-600 hover:bg-green-50 p-1.5 rounded" title="Stock In"><ArrowDownCircle size={16} /></button>
@@ -344,29 +355,48 @@ export default function Inventory() {
                   )}
                 </div>
               </div>
-              {[
-                { label: "Product Name", key: "name", type: "text" },
-                { label: "SKU Code", key: "sku", type: "text" },
-                { label: "Category", key: "category", type: "text" },
-                { label: "Unit (e.g. kg, pcs, ltr)", key: "unit", type: "text" },
-                { label: "Purchase Cost (₹)", key: "unit_purchase_cost", type: "number" },
-                { label: "Selling Price (₹)", key: "price", type: "number" },
-                { label: "Initial Quantity", key: "current_stock_qty", type: "number" },
-                { label: "Safety Low Threshold", key: "safety_low_threshold", type: "number" },
-              ].map(f => (
-                <div key={f.key}>
-                  <label className="text-xs font-semibold text-gray-600 uppercase">
-                    {f.key === "current_stock_qty"
-                      ? `Initial Quantity (${addForm.unit || "pcs"})`
-                      : f.key === "safety_low_threshold"
-                      ? `Safety Low Threshold (${addForm.unit || "pcs"})`
-                      : f.label}
-                  </label>
-                  <input type={f.type} required value={(addForm as any)[f.key]}
-                    onChange={e => setAddForm(prev => ({ ...prev, [f.key]: e.target.value }))}
-                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
-                </div>
-              ))}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Product Name</label>
+                <input type="text" required value={addForm.name} onChange={e => setAddForm(p => ({ ...p, name: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">SKU Code (auto-generated)</label>
+                <input type="text" value={addForm.sku} onChange={e => setAddForm(p => ({ ...p, sku: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon font-mono bg-gray-50" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Category</label>
+                <select required value={addForm.category} onChange={e => setAddForm(p => ({ ...p, category: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
+                  <option value="">— Select Category —</option>
+                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Unit</label>
+                <select value={addForm.unit} onChange={e => setAddForm(p => ({ ...p, unit: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
+                  <option value="gm">gm</option>
+                  <option value="kg">kg</option>
+                  <option value="pc">pc</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Selling Price (₹)</label>
+                <input type="number" required min="0" step="0.01" value={addForm.price} onChange={e => setAddForm(p => ({ ...p, price: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Initial Quantity ({addForm.unit}) <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input type="number" min="0" value={addForm.current_stock_qty} onChange={e => setAddForm(p => ({ ...p, current_stock_qty: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Safety Low Threshold ({addForm.unit})</label>
+                <input type="number" min="0" value={addForm.safety_low_threshold} onChange={e => setAddForm(p => ({ ...p, safety_low_threshold: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
               <div>
                 <label className="text-xs font-semibold text-gray-600 uppercase">Description (optional)</label>
                 <textarea

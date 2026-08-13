@@ -17,10 +17,12 @@ export default function DealerExpenses() {
   const [showDealerModal, setShowDealerModal] = useState(false);
   const [dealerForm, setDealerForm] = useState({ name: "", address: "", gstin: "", phone: "" });
   const [dealerError, setDealerError] = useState("");
+  const [deleteDealerId, setDeleteDealerId] = useState<string | null>(null);
 
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [expenseForm, setExpenseForm] = useState({ expense_code: "EXP_SALARY_DRAW", amount: "", dealer_id: "", description: "" });
   const [expenseError, setExpenseError] = useState("");
+  const [expenseSubmitting, setExpenseSubmitting] = useState(false);
 
   const [showRawModal, setShowRawModal] = useState(false);
   const [rawForm, setRawForm] = useState({ material_name: "", qty: "", unit: "kg", rate_per_unit: "", dealer_id: "", notes: "", is_paid: false, due_date: new Date(Date.now() + 7*24*60*60*1000).toISOString().split("T")[0] });
@@ -102,7 +104,7 @@ export default function DealerExpenses() {
   const filteredExpenses = expenses.filter(e => inDateRange(e.expense_date));
 
   const totalPOSInflows = filteredOrders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
-  const totalStockValue = products.reduce((s, p) => s + (Number(p.unit_purchase_cost > 0 ? p.unit_purchase_cost : p.price) * Number(p.current_stock_qty || 0)), 0);
+  const totalStockValue = products.reduce((s, p) => s + (Number(p.unit_purchase_cost || 0) * Number(p.current_stock_qty || 0)), 0);
   const totalExpenses = filteredExpenses.reduce((s, e) => s + Number(e.amount), 0);
   const netIncome = totalPOSInflows - totalExpenses;
   const outstandingPayables = rawPurchases
@@ -113,32 +115,36 @@ export default function DealerExpenses() {
   const handleAddDealer = async (e: React.FormEvent) => {
     e.preventDefault();
     setDealerError("");
-    if (dealerForm.name.length > 100) { setDealerError("Name must be ≤ 100 characters."); return; }
-    if (!GSTIN_REGEX.test(dealerForm.gstin)) { setDealerError("Invalid GSTIN format (15-char alphanumeric)."); return; }
+    if (!dealerForm.name.trim()) { setDealerError("Dealer name is required."); return; }
     if (!/^\d{10}$/.test(dealerForm.phone)) { setDealerError("Phone must be exactly 10 digits."); return; }
+    if (dealerForm.gstin && !GSTIN_REGEX.test(dealerForm.gstin)) { setDealerError("Invalid GSTIN format (15-char alphanumeric)."); return; }
     await apiFetch("/api/dealers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dealerForm) });
     setShowDealerModal(false);
     setDealerForm({ name: "", address: "", gstin: "", phone: "" });
     fetchAll();
   };
 
-  const handleDeleteDealer = async (id: string) => {
-    if (!confirm("Delete this dealer?")) return;
-    await apiFetch(`/api/dealers/${id}`, { method: "DELETE" });
+  const handleDeleteDealer = async () => {
+    if (!deleteDealerId) return;
+    await apiFetch(`/api/dealers/${deleteDealerId}`, { method: "DELETE" });
+    setDeleteDealerId(null);
     fetchAll();
   };
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (expenseSubmitting) return;
     setExpenseError("");
     if (!expenseForm.amount || Number(expenseForm.amount) <= 0) { setExpenseError("Enter a valid amount."); return; }
     if (expenseForm.expense_code === "EXP_SALARY_DRAW" && !expenseForm.dealer_id) {
       setExpenseError("Salary Draw must be linked to an employee."); return;
     }
+    setExpenseSubmitting(true);
     await apiFetch("/api/expenses", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...expenseForm, amount: Number(expenseForm.amount), dealer_id: expenseForm.dealer_id || null })
     });
+    setExpenseSubmitting(false);
     setShowExpenseModal(false);
     setExpenseForm({ expense_code: "EXP_SALARY_DRAW", amount: "", dealer_id: "", description: "" });
     fetchAll();
@@ -489,7 +495,7 @@ export default function DealerExpenses() {
             {isReadOnly ? (
               <span className="flex items-center gap-1 text-xs text-yellow-600 bg-yellow-50 border border-yellow-200 px-3 py-2 rounded font-semibold"><EyeOff size={12} /> Read-Only</span>
             ) : (
-              <button onClick={() => { setShowDealerModal(true); setDealerError(""); }}
+              <button onClick={() => { setShowDealerModal(true); setDealerError(""); setDealerForm({ name: "", address: "", gstin: "", phone: "" }); }}
                 className="bg-maroon hover:bg-maroon-light text-white px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-1">
                 <Plus size={14} /> Add Dealer
               </button>
@@ -522,7 +528,7 @@ export default function DealerExpenses() {
                           : <span className="text-green-600 text-xs font-semibold">Cleared</span>}
                       </td>
                       <td className="py-3 px-4">
-                        {!isReadOnly && <button onClick={() => handleDeleteDealer(d.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>}
+                        {!isReadOnly && <button onClick={() => setDeleteDealerId(d.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>}
                       </td>
                     </tr>
                   );
@@ -651,6 +657,20 @@ export default function DealerExpenses() {
         </div>
       )}
 
+      {/* Delete Dealer Confirm */}
+      {deleteDealerId && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <h3 className="font-bold text-gray-800 text-lg">Delete this dealer?</h3>
+            <p className="text-sm text-gray-500">This action cannot be undone.</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setDeleteDealerId(null)} className="px-4 py-2 rounded border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+              <button onClick={handleDeleteDealer} className="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-sm font-semibold">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Dealer Modal */}
       {showDealerModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
@@ -661,25 +681,25 @@ export default function DealerExpenses() {
             </div>
             <form onSubmit={handleAddDealer} className="p-5 space-y-3">
               <div>
-                <label className="text-xs font-semibold text-gray-600 uppercase">Dealer Name (max 100 chars)</label>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Dealer Name <span className="text-red-500">*</span></label>
                 <input type="text" maxLength={100} required value={dealerForm.name} onChange={e => setDealerForm(p => ({ ...p, name: e.target.value }))}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
               </div>
               <div>
-                <label className="text-xs font-semibold text-gray-600 uppercase">Address</label>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Phone (10 digits) <span className="text-red-500">*</span></label>
+                <input type="text" maxLength={10} required value={dealerForm.phone} onChange={e => setDealerForm(p => ({ ...p, phone: e.target.value.replace(/\D/g, "") }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase">Address <span className="text-gray-400 font-normal">(optional)</span></label>
                 <textarea value={dealerForm.address} onChange={e => setDealerForm(p => ({ ...p, address: e.target.value }))}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" rows={2} />
               </div>
               <div>
-                <label className="text-xs font-semibold text-gray-600 uppercase">GSTIN (15-char)</label>
-                <input type="text" maxLength={15} required value={dealerForm.gstin} onChange={e => setDealerForm(p => ({ ...p, gstin: e.target.value.toUpperCase() }))}
+                <label className="text-xs font-semibold text-gray-600 uppercase">GSTIN <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input type="text" maxLength={15} value={dealerForm.gstin} onChange={e => setDealerForm(p => ({ ...p, gstin: e.target.value.toUpperCase() }))}
                   placeholder="e.g. 10AAAAA1234A1Z1"
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon font-mono" />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-600 uppercase">Phone (10 digits)</label>
-                <input type="text" maxLength={10} required value={dealerForm.phone} onChange={e => setDealerForm(p => ({ ...p, phone: e.target.value.replace(/\D/g, "") }))}
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
               </div>
               {dealerError && <p className="text-red-500 text-sm">{dealerError}</p>}
               <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">Add Dealer</button>
@@ -701,8 +721,8 @@ export default function DealerExpenses() {
                 <label className="text-xs font-semibold text-gray-600 uppercase">Expense Category</label>
                 <select value={expenseForm.expense_code} onChange={e => setExpenseForm(p => ({ ...p, expense_code: e.target.value, dealer_id: "" }))}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
-                  <option value="EXP_SALARY_DRAW">Salary Draw (EXP_SALARY_DRAW)</option>
-                  <option value="EXP_MISC_OPERATIONAL">Misc Operational (EXP_MISC_OPERATIONAL)</option>
+                  <option value="EXP_SALARY_DRAW">Salary Draw</option>
+                  <option value="EXP_MISC_OPERATIONAL">Misc Operational</option>
                 </select>
               </div>
               {expenseForm.expense_code === "EXP_SALARY_DRAW" && (
@@ -728,7 +748,7 @@ export default function DealerExpenses() {
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
               </div>
               {expenseError && <p className="text-red-500 text-sm">{expenseError}</p>}
-              <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">Log Expense</button>
+              <button type="submit" disabled={expenseSubmitting} className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2 disabled:opacity-60">{expenseSubmitting ? "Saving..." : "Log Expense"}</button>
             </form>
           </div>
         </div>

@@ -51,11 +51,15 @@ function RequireAuth({ children }: { children: React.ReactElement }) {
 }
 
 function RequireMobileAuth({ children }: { children: React.ReactElement }) {
+  const [isDesktop, setIsDesktop] = React.useState(window.innerWidth >= 768);
+  React.useEffect(() => {
+    const handler = () => setIsDesktop(window.innerWidth >= 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+  if (isDesktop) return <Navigate to="/admin/login" replace />;
   const token = localStorage.getItem("customerToken");
-  const isGuest = localStorage.getItem("guestBrowse") === "true";
-  if (token || isGuest) return children;
-  // On desktop, redirect to admin login instead of mobile splash
-  if (window.innerWidth >= 768) return <Navigate to="/admin/login" replace />;
+  if (token) return children;
   return <Navigate to="/login" replace />;
 }
 
@@ -119,7 +123,7 @@ export default function App() {
           <Route path="inventory" element={<PermissionGuard module="Inventory"><ErrorBoundary><Inventory /></ErrorBoundary></PermissionGuard>} />
           <Route path="orders" element={<PermissionGuard module="Orders"><ErrorBoundary><AdminOrders /></ErrorBoundary></PermissionGuard>} />
           <Route path="categories" element={<PermissionGuard module="Inventory"><ErrorBoundary><AdminCategories /></ErrorBoundary></PermissionGuard>} />
-          <Route path="employee" element={<PermissionGuard module="Orders"><ErrorBoundary><AdminEmployee /></ErrorBoundary></PermissionGuard>} />
+          <Route path="employee" element={<PermissionGuard module="Employees"><ErrorBoundary><AdminEmployee /></ErrorBoundary></PermissionGuard>} />
           <Route path="report" element={<PermissionGuard module="Financial Reports"><ErrorBoundary><AdminReport /></ErrorBoundary></PermissionGuard>} />
           <Route path="dealer" element={<PermissionGuard module="Financial Reports"><ErrorBoundary><DealerExpenses /></ErrorBoundary></PermissionGuard>} />
           <Route path="reviews" element={<ErrorBoundary><AdminReviews /></ErrorBoundary>} />

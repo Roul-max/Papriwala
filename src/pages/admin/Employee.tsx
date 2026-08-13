@@ -27,6 +27,7 @@ export default function AdminEmployee() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState({ ...EMPTY_EMP });
   const [addError, setAddError] = useState("");
+  const [addSubmitting, setAddSubmitting] = useState(false);
 
   const [attendanceDate, setAttendanceDate] = useState(today);
   const [attendanceMap, setAttendanceMap] = useState<Record<string, string>>({});
@@ -79,17 +80,20 @@ export default function AdminEmployee() {
 
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (addSubmitting) return;
     setAddError("");
     if (!/^[A-Za-z\s]+$/.test(addForm.full_name)) { setAddError("Full name must contain alphabetic characters only."); return; }
     if (!/^\d{10}$/.test(addForm.phone_number)) { setAddError("Phone must be exactly 10 digits."); return; }
     if (!addForm.designation_tag) { setAddError("Please select a designation."); return; }
     if (!addForm.base_compensation_rate || Number(addForm.base_compensation_rate) <= 0) { setAddError("Enter a valid compensation rate."); return; }
     if (addForm.last_working_date && addForm.last_working_date <= addForm.joining_date) { setAddError("Last working date must be after joining date."); return; }
+    setAddSubmitting(true);
     const res = await apiFetch("/api/employees", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...addForm, name: addForm.full_name, base_compensation_rate: Number(addForm.base_compensation_rate) })
     });
     const data = await res.json();
+    setAddSubmitting(false);
     setShowAddModal(false);
     setAddForm({ ...EMPTY_EMP });
     fetchEmployees();
@@ -419,7 +423,7 @@ export default function AdminEmployee() {
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
               </div>
               {addError && <p className="text-red-500 text-sm">{addError}</p>}
-              <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">Add Employee</button>
+              <button type="submit" disabled={addSubmitting} className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2 disabled:opacity-60">{addSubmitting ? "Adding..." : "Add Employee"}</button>
             </form>
           </div>
         </div>

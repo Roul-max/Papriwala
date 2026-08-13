@@ -145,7 +145,7 @@ export default function AdminCategories() {
               <div className="flex items-center gap-4 p-4">
                 <div className="w-14 h-14 rounded-lg overflow-hidden bg-gray-100 shrink-0">
                   {cat.image
-                    ? <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" />
+                    ? <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display='none'; }}/>
                     : <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageIcon size={24} /></div>
                   }
                 </div>
@@ -187,7 +187,7 @@ export default function AdminCategories() {
                         <div key={p.id} className="bg-gray-50 rounded-lg border border-gray-100 overflow-hidden group relative">
                           <div className="h-20 bg-amber-50">
                             {p.image
-                              ? <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                              ? <img src={p.image} alt={p.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display='none'; }}/>
                               : <div className="w-full h-full flex items-center justify-center text-gray-300"><Package size={24} /></div>
                             }
                           </div>

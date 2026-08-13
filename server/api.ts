@@ -13,6 +13,8 @@ const otpStore = new Map<string, { otp: string; expires: number; employeeId: str
 // ── Input sanitization helper ─────────────────────────────────────────────────────
 function sanitize(val: any): string {
   if (typeof val !== "string") return "";
+  // Don't truncate base64 image data URLs
+  if (val.startsWith("data:")) return val;
   return val.replace(/[<>"'`;]/g, "").trim().slice(0, 500);
 }
 
@@ -493,7 +495,8 @@ router.get("/dealers", async (_req, res) => {
 
 router.post("/dealers", async (req, res) => {
   const { name, address, gstin, phone } = req.body;
-  if (!name || !gstin || !phone) return res.status(400).json({ error: "name, gstin and phone are required" });
+  if (!name || !phone) return res.status(400).json({ error: "name and phone are required" });
+  if (gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gstin)) return res.status(400).json({ error: "Invalid GSTIN format" });
   res.json(await dbInsert("dealers", {
     id: crypto.randomUUID(),
     name: sanitize(name),

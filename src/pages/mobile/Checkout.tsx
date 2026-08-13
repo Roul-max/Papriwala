@@ -12,7 +12,7 @@ export default function Checkout() {
   const [orderError, setOrderError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const isGuest = localStorage.getItem("guestBrowse") === "true" && !localStorage.getItem("customerToken");
+  const isGuest = !localStorage.getItem("customerToken");
 
   const urlParams = new URLSearchParams(window.location.search);
   const tableId = urlParams.get("table_id") || sessionStorage.getItem("qr_table_id") || "Counter";

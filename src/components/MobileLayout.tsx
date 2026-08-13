@@ -39,7 +39,6 @@ export default function MobileLayout() {
       <div className="text-center">
         <p className="text-gray-500 text-lg font-semibold">Please open on a mobile device</p>
         <p className="text-gray-400 text-sm mt-1">or use browser mobile view (F12)</p>
-        <a href="/admin/login" className="mt-4 inline-block text-maroon font-bold underline text-sm">Go to Admin Portal →</a>
       </div>
     </div>
   );
