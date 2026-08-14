@@ -928,6 +928,39 @@ router.get("/product-variants", async (req, res) => {
   res.json(product_id ? all.filter((v: any) => v.product_id === product_id) : all);
 });
 
+// ─── Banners ─────────────────────────────────────────────────────────────────
+router.get("/banners", async (_req, res) => {
+  if (!db.banners) db.banners = [];
+  res.json(await dbSelect("banners", db.banners));
+});
+
+router.post("/banners", async (req, res) => {
+  if (!db.banners) db.banners = [];
+  const { image, label, sub } = req.body;
+  if (!image) return res.status(400).json({ error: "image is required" });
+  res.json(await dbInsert("banners", { id: crypto.randomUUID(), image: sanitize(image), label: sanitize(label || ""), sub: sanitize(sub || "") }, db.banners));
+});
+
+router.delete("/banners/:id", async (req, res) => {
+  if (!db.banners) db.banners = [];
+  await dbDelete("banners", req.params.id);
+  const idx = db.banners.findIndex((b: any) => b.id === req.params.id);
+  if (idx !== -1) db.banners.splice(idx, 1);
+  res.json({ success: true });
+});
+
+router.patch("/banners/:id", async (req, res) => {
+  if (!db.banners) db.banners = [];
+  const patch: any = {};
+  if (req.body.image !== undefined) patch.image = sanitize(req.body.image);
+  if (req.body.label !== undefined) patch.label = sanitize(req.body.label);
+  if (req.body.sub   !== undefined) patch.sub   = sanitize(req.body.sub);
+  const updated = await dbUpdate("banners", req.params.id, patch);
+  const local = db.banners.find((b: any) => b.id === req.params.id);
+  if (local) Object.assign(local, patch);
+  res.json(updated);
+});
+
 // ─── Categories ──────────────────────────────────────────────────────────────
 router.get("/categories", async (_req, res) => {
   res.json(await dbSelect("categories", db.categories));

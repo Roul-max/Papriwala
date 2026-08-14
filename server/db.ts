@@ -70,6 +70,7 @@ export const db: any = {
     { id: "g4", title: "Gulab Jamun",             url: "https://images.pexels.com/photos/14477896/pexels-photo-14477896.jpeg?auto=compress&cs=tinysrgb&w=600" },
     { id: "g5", title: "Bakery Delights",         url: "https://images.pexels.com/photos/1775043/pexels-photo-1775043.jpeg?auto=compress&cs=tinysrgb&w=600" },
   ],
+  banners: [] as any[],
 };
 
 // ─── Bootstrap: load persisted settings (incl. adminPasswordHash) on startup ─

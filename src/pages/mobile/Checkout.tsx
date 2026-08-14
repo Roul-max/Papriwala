@@ -51,7 +51,7 @@ export default function Checkout() {
           payment_method: method,
           customer_id: localStorage.getItem("customerId") || null,
           items: items.map(i => ({ name: i.name, size: i.size, price: i.price, qty: i.qty, unit: i.unit || "pcs", note: i.note || "" })),
-          tax_collected: (total / 1.05 * 0.05),
+          tax_collected: total * 0.05,
         }),
       });
 
@@ -119,6 +119,7 @@ export default function Checkout() {
           <div className="flex flex-col">
             <span className="text-xs text-gray-500 uppercase font-bold tracking-wider">Total to pay</span>
             <span className="text-xl font-bold text-maroon">₹{total.toFixed(2)}</span>
+            <span className="text-xs text-gray-400 mt-0.5">Incl. Tax 5%: ₹{tax.toFixed(2)}</span>
           </div>
           <button onClick={handlePlaceOrder} disabled={loading}
             className="bg-maroon text-cream font-bold px-8 py-3.5 rounded-xl hover:bg-maroon-light transition-colors shadow-md text-lg disabled:opacity-60">

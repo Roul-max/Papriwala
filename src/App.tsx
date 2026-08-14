@@ -21,6 +21,7 @@ import Wishlist from "./pages/mobile/Wishlist";
 import AboutUs from "./pages/mobile/AboutUs";
 import Gallery from "./pages/mobile/Gallery";
 
+import Bestsellers from "./pages/mobile/Bestsellers";
 import AdminOrders from "./pages/admin/Orders";
 import AdminCategories from "./pages/admin/Categories";
 import AdminEmployee from "./pages/admin/Employee";
@@ -137,6 +138,7 @@ export default function App() {
         <Route path="/" element={<RequireMobileAuth><CartProvider><MobileLayout /></CartProvider></RequireMobileAuth>}>
           <Route index element={<Home />} />
           <Route index element={<Home />} />
+          <Route path="bestsellers" element={<Bestsellers />} />
           <Route path="categories" element={<Categories />} />
           <Route path="category/:id" element={<ProductList />} />
           <Route path="product/:id" element={<ProductDetail />} />

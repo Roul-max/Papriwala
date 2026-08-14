@@ -92,8 +92,7 @@ export default function ProductList() {
             <div className="ml-4 flex flex-col justify-between py-1 flex-1">
               <Link to={`/product/${product.id}`}>
                 <h3 className="font-bold text-gray-800 pr-6 leading-tight">{product.name}</h3>
-                <p className="text-maroon font-semibold text-sm mt-1">₹{product.price} / {product.unit === "gm" ? "gm" : "pc"}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{product.current_stock_qty} {product.unit === "gm" ? "gm left" : "pcs left"}</p>
+                <p className="text-maroon font-semibold text-sm mt-1">₹{product.unit === "gm" ? (product.price * 1000).toFixed(0) : product.price} / {product.unit === "gm" ? "kg" : (product.unit === "kg" ? "kg" : "pc")}</p>
               </Link>
               {product.unit === "gm" ? (
                 <div className="flex items-center gap-1 mt-2">

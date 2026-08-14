@@ -37,6 +37,7 @@ export default function ProductDetail() {
   };
 
   const isGm = product?.unit === "gm";
+  const isKg = product?.unit === "kg";
   const isOutOfStock = product.current_stock_qty <= 0;
   const isLowStock = !isOutOfStock && product.current_stock_qty <= product.safety_low_threshold;
 
@@ -53,6 +54,12 @@ export default function ProductDetail() {
         return;
       }
       addToCart({ ...product, price: finalPrice }, size, grams);
+    } else if (isKg) {
+      if (qty > product.current_stock_qty) {
+        alert(`Only ${product.current_stock_qty} kg available.`);
+        return;
+      }
+      addToCart({ ...product, price: finalPrice }, size, qty);
     } else {
       if (qty > product.current_stock_qty) {
         alert(`Only ${product.current_stock_qty} pcs available.`);
@@ -60,13 +67,13 @@ export default function ProductDetail() {
       }
       addToCart({ ...product, price: finalPrice }, size, qty);
     }
-    navigate("/cart");
+    // toast shown by useCart — no navigate
   };
 
   return (
     <div className="relative flex flex-col min-h-full bg-white pb-40">
-      {/* Header */}
-      <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-10">
+      {/* Header — fixed on scroll */}
+      <div className="sticky top-0 left-0 right-0 p-4 flex items-center justify-between z-10 bg-white/80 backdrop-blur-sm border-b border-gray-100">
         <button onClick={() => navigate(-1)} className="w-10 h-10 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center text-maroon shadow-sm">
           <ChevronLeft size={24} />
         </button>
@@ -91,9 +98,8 @@ export default function ProductDetail() {
             <Heart size={28} fill={isInWishlist(product.id) ? 'currentColor' : 'none'} />
           </button>
         </div>
-        <p className="text-gold font-bold text-xl mb-1">₹{getPrice().toFixed(2)} <span className="text-sm font-normal text-gray-500">/ gm</span></p>
+        <p className="text-gold font-bold text-xl mb-1">₹{isGm ? (getPrice() * 1000).toFixed(0) : getPrice().toFixed(2)} <span className="text-sm font-normal text-gray-500">/ {isGm ? "kg" : isKg ? "kg" : (product.unit || "pc")}</span></p>
         <div className="flex items-center gap-2 mb-4">
-          <p className="text-xs text-gray-400">{product.current_stock_qty} {isGm ? "gm left" : "pcs left"}</p>
           {isOutOfStock && <span className="text-xs font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Out of Stock</span>}
           {isLowStock && <span className="text-xs font-bold bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full">Low Stock</span>}
         </div>
@@ -155,7 +161,7 @@ export default function ProductDetail() {
       </div>
 
       {/* Sticky Bottom Bar */}
-      <div className="fixed bottom-[64px] left-0 right-0 max-w-md mx-auto p-4 bg-white border-t border-gray-100 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-30">
+      <div className="fixed left-0 right-0 max-w-md mx-auto p-4 bg-white border-t border-gray-100 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-30" style={{ bottom: 'calc(64px + env(safe-area-inset-bottom))' }}>
         <button onClick={handleAddToCart} disabled={isOutOfStock}
           className="w-full bg-maroon text-cream font-bold py-4 rounded-xl hover:bg-maroon-light transition-colors shadow-md flex items-center justify-center gap-2 text-lg disabled:opacity-50 disabled:cursor-not-allowed">
           <ShoppingBag size={20} /> {isOutOfStock ? "Out of Stock" : "Add to Cart"}

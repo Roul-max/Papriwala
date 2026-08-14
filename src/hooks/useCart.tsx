@@ -128,7 +128,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const subtotal = items.reduce((sum, item) => sum + (item.price * item.qty), 0);
   const tax = subtotal * 0.05;
-  const total = subtotal + tax;
+  const total = subtotal; // tax is informational only, not added to total
 
   return (
     <CartContext.Provider value={{ items, addToCart, removeFromCart, updateQty, updateNote, clearCart, subtotal, tax, total }}>

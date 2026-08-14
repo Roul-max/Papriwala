@@ -8,7 +8,7 @@ export default function AdminProfile() {
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [nameError, setNameError] = useState("");
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState<"photo" | "name" | null>(null);
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -63,11 +63,10 @@ export default function AdminProfile() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ avatar: null }),
     });
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+    setSaveSuccess("photo");
+    setTimeout(() => setSaveSuccess(null), 3000);
   };
 
-  // ── Photo upload ────────────────────────────────────────────────────────────
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -89,7 +88,7 @@ export default function AdminProfile() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ avatar: base64 }),
       });
-      if (res.ok) { setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 3000); }
+      if (res.ok) { setSaveSuccess("photo"); setTimeout(() => setSaveSuccess(null), 3000); }
     };
     img.src = URL.createObjectURL(file);
   };
@@ -118,11 +117,10 @@ export default function AdminProfile() {
     localStorage.setItem("adminName", trimmed);
     window.dispatchEvent(new Event("avatarChanged"));
     setEditingName(false);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+    setSaveSuccess("name");
+    setTimeout(() => setSaveSuccess(null), 3000);
   };
 
-  // ── Password change (Admin only) ────────────────────────────────────────────
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError("");
@@ -177,7 +175,7 @@ export default function AdminProfile() {
               )}
               <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
             </div>
-            {saveSuccess && (
+            {saveSuccess === "photo" && (
               <div className="flex items-center gap-1 text-green-600 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5 text-xs font-semibold mb-2">
                 <CheckCircle2 size={13} /> Photo saved!
               </div>
@@ -220,9 +218,9 @@ export default function AdminProfile() {
               {isAdmin ? "Full Access" : role}
             </div>
 
-            {saveSuccess && (
+            {saveSuccess === "name" && (
               <div className="flex items-center gap-1 text-green-600 text-xs font-semibold mt-3">
-                <CheckCircle2 size={13} /> Profile updated!
+                <CheckCircle2 size={13} /> Name updated!
               </div>
             )}
           </div>

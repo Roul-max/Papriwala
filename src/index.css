@@ -36,6 +36,9 @@ html {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
 
 /* §2.1.2 Bell badge custom keyframe flash animation */

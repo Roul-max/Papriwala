@@ -44,12 +44,18 @@ export default function Cart() {
                 </div>
                 <div className="flex items-center justify-between mt-2">
                   <span className="font-bold text-maroon">₹{(item.price * item.qty).toFixed(2)}</span>
+                  {item.unit === "gm" || item.unit === "kg" ? (
+                    <span className="text-sm font-bold text-gray-700 bg-gray-100 px-3 py-1 rounded-full">
+                      {item.unit === "gm" ? `${item.qty} gm` : `${item.qty} kg`}
+                    </span>
+                  ) : (
                   <div className="flex items-center bg-gray-50 border border-gray-200 rounded-full px-1">
                     <button onClick={() => updateQty(item.id, -1)} className="w-6 h-6 flex items-center justify-center text-gray-600 font-bold">-</button>
                     <span className="w-6 text-center font-bold text-sm">{item.qty}</span>
                     <button onClick={() => updateQty(item.id, 1)} disabled={isLow || isOut}
                       className="w-6 h-6 flex items-center justify-center text-gray-600 font-bold disabled:opacity-30 disabled:cursor-not-allowed">+</button>
                   </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -65,9 +71,9 @@ export default function Cart() {
               <span>Subtotal</span>
               <span className="font-semibold text-gray-800">₹{subtotal.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between text-sm text-gray-600">
-              <span>Taxes (5%)</span>
-              <span className="font-semibold text-gray-800">₹{tax.toFixed(2)}</span>
+            <div className="flex justify-between text-xs text-gray-400">
+              <span>Tax 5% (incl.)</span>
+              <span>₹{tax.toFixed(2)}</span>
             </div>
             <div className="border-t border-gray-100 pt-3 flex justify-between items-center">
               <span className="font-bold text-gray-800">Total</span>
@@ -75,7 +81,7 @@ export default function Cart() {
             </div>
           </div>
 
-          <div className="fixed bottom-[64px] left-0 right-0 max-w-md mx-auto p-4 bg-white border-t border-gray-100 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-30">
+          <div className="fixed left-0 right-0 max-w-md mx-auto p-4 bg-white border-t border-gray-100 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-30" style={{ bottom: 'calc(64px + env(safe-area-inset-bottom))' }}>
             <button onClick={() => navigate("/checkout")} className="w-full bg-maroon text-cream font-bold py-4 rounded-xl hover:bg-maroon-light transition-colors shadow-md text-lg">
               Proceed to Checkout
             </button>

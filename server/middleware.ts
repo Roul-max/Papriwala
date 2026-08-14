@@ -98,7 +98,8 @@ function isPublicMobilePath(path: string): boolean {
   return (
     path.startsWith("/products") ||
     path.startsWith("/categories") ||
-    path.startsWith("/product-variants")
+    path.startsWith("/product-variants") ||
+    path.startsWith("/banners")
   );
 }
 

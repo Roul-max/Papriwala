@@ -44,10 +44,10 @@ export default function MobileLayout() {
   );
 
   return (
-    <div className="mobile-portal flex flex-col h-screen w-full max-w-md mx-auto bg-cream-light font-sans relative overflow-hidden shadow-2xl sm:border-x sm:border-gray-200" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+    <div className="mobile-portal flex flex-col w-full max-w-md mx-auto bg-cream-light font-sans relative shadow-2xl sm:border-x sm:border-gray-200" style={{ height: '100dvh' }}>
 
       {/* Top Header */}
-      <header className="bg-maroon text-cream flex items-center justify-between p-4 shrink-0 z-20">
+      <header className="bg-maroon text-cream flex items-center justify-between p-4 shrink-0 z-20" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1rem)', marginTop: '-1rem' }}>
         <button onClick={() => setSidebarOpen(true)} className="p-1"><Menu size={24} /></button>
         <img src="/Logo.png" alt="Logo" className="w-12 h-12 object-contain absolute left-1/2 -translate-x-1/2" />
         <Link to="/profile" className="p-1">
@@ -58,12 +58,12 @@ export default function MobileLayout() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto bg-cream-light pb-20">
+      <main className="flex-1 overflow-y-auto bg-cream-light" style={{ paddingBottom: 'calc(64px + env(safe-area-inset-bottom))' }}>
         <Outlet />
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around items-center h-16 shrink-0 z-20 pb-safe">
+      <nav className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around items-center shrink-0 z-20" style={{ height: 'calc(64px + env(safe-area-inset-bottom))', paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {[
           { name: "Home",       path: "/",           icon: Home },
           { name: "Categories", path: "/categories", icon: Grid },

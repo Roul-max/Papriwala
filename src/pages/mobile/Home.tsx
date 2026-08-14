@@ -2,8 +2,9 @@ import { useEffect, useState, useRef } from "react";
 import { ChevronRight, ChevronLeft, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useCart } from "../../hooks/useCart";
+import { apiFetch } from "../../lib/apiFetch";
 
-const SLIDES = [
+const DEFAULT_SLIDES = [
   { image: "https://images.pexels.com/photos/1028714/pexels-photo-1028714.jpeg?auto=compress&cs=tinysrgb&w=800", label: "Premium Sweets",   sub: "Handcrafted with love" },
   { image: "https://images.pexels.com/photos/4449068/pexels-photo-4449068.jpeg?auto=compress&cs=tinysrgb&w=800", label: "Fresh Namkeen",    sub: "Crispy & flavourful" },
   { image: "https://images.pexels.com/photos/1775043/pexels-photo-1775043.jpeg?auto=compress&cs=tinysrgb&w=800", label: "Bakery Delights",  sub: "Baked fresh daily" },
@@ -14,6 +15,7 @@ export default function Home() {
   const [categories, setCategories] = useState<any[]>([]);
   const [bestsellers, setBestsellers] = useState<any[]>([]);
   const [allProducts, setAllProducts] = useState<any[]>([]);
+  const [slides, setSlides] = useState<any[]>([]);
   const [slideIndex, setSlideIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ type: "product" | "category"; id: string; name: string; sub: string; image: string; to: string }[]>([]);
@@ -23,9 +25,10 @@ export default function Home() {
 
   // Auto-advance slideshow every 3.5s
   useEffect(() => {
-    const t = setInterval(() => setSlideIndex(i => (i + 1) % SLIDES.length), 3500);
+    if (slides.length === 0) return;
+    const t = setInterval(() => setSlideIndex(i => (i + 1) % slides.length), 3500);
     return () => clearInterval(t);
-  }, []);
+  }, [slides.length]);
 
   // Search filter — products + categories
   useEffect(() => {
@@ -43,17 +46,23 @@ export default function Home() {
   }, [searchQuery, allProducts, categories]);
 
   useEffect(() => {
-    fetch("/api/products")
+    apiFetch("/api/products")
       .then(res => res.json())
       .then(data => {
         const list = Array.isArray(data) ? data : [];
         setAllProducts(list);
         setBestsellers(list.slice(0, 6));
-      });
+      }).catch(() => {});
 
-    fetch("/api/categories")
+    apiFetch("/api/categories")
       .then(res => res.json())
-      .then(data => setCategories(Array.isArray(data) ? data : []));
+      .then(data => setCategories(Array.isArray(data) ? data : []))
+      .catch(() => {});
+
+    apiFetch("/api/banners")
+      .then(res => res.ok ? res.json() : Promise.reject(res.status))
+      .then(data => setSlides(Array.isArray(data) && data.length > 0 ? data : DEFAULT_SLIDES))
+      .catch(() => setSlides(DEFAULT_SLIDES));
   }, []);
 
   const categoryImages: Record<string, string> = {
@@ -133,15 +142,16 @@ export default function Home() {
       </div>
 
       {/* Hero Slideshow */}
+      {slides.length > 0 && (
       <div className="w-full relative shrink-0 px-4">
         <div className="h-52 w-full relative rounded-3xl overflow-hidden shadow-md"
           onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
           onTouchEnd={e => {
             const diff = touchStartX.current - e.changedTouches[0].clientX;
-            if (Math.abs(diff) > 40) setSlideIndex(i => diff > 0 ? (i + 1) % SLIDES.length : (i - 1 + SLIDES.length) % SLIDES.length);
+            if (Math.abs(diff) > 40) setSlideIndex(i => diff > 0 ? (i + 1) % slides.length : (i - 1 + slides.length) % slides.length);
           }}
         >
-          {SLIDES.map((slide, i) => (
+          {slides.map((slide, i) => (
             <div
               key={i}
               className="absolute inset-0 transition-opacity duration-700"
@@ -157,7 +167,7 @@ export default function Home() {
           ))}
           {/* Dot indicators */}
           <div className="absolute bottom-3 right-4 flex gap-1.5">
-            {SLIDES.map((_, i) => (
+            {slides.map((_, i) => (
               <button
                 key={i}
                 onClick={() => setSlideIndex(i)}
@@ -167,6 +177,7 @@ export default function Home() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Categories Rail */}
       <div className="px-4">
@@ -204,7 +215,7 @@ export default function Home() {
       <div className="px-4">
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-serif text-maroon font-bold text-lg">Best Sellers</h3>
-          <Link to="/categories" className="text-xs font-bold text-gold hover:text-gold-light">VIEW ALL</Link>
+          <Link to="/bestsellers" className="text-xs font-bold text-gold hover:text-gold-light">VIEW ALL</Link>
         </div>
 
         <div className="grid grid-cols-3 gap-3">
@@ -215,7 +226,7 @@ export default function Home() {
               </div>
               <div className="p-2 flex flex-col flex-1 justify-between">
                 <h4 className="font-bold text-[11px] text-gray-800 line-clamp-2 leading-tight mb-1">{product.name}</h4>
-                <p className="text-maroon font-bold text-[10px] mt-1">₹{product.price}/kg</p>
+              <p className="text-maroon font-bold text-[10px] mt-1">₹{product.unit === "gm" ? (product.price * 1000).toFixed(0) : product.price}/{product.unit === "gm" ? "kg" : (product.unit || "pc")}</p>
               </div>
             </Link>
           ))}
