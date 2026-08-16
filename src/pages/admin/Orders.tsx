@@ -28,6 +28,7 @@ interface Order {
   discount_applied?: number;
 }
 
+type Tab = "orders" | "deleted";
 type FilterMode = "all" | "month" | "custom";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -107,7 +108,9 @@ const STATUS_COLOR: Record<string, string> = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AdminOrders() {
+  const [tab,         setTab]         = useState<Tab>("orders");
   const [orders,      setOrders]      = useState<Order[]>([]);
+  const [deletedBills, setDeletedBills] = useState<any[]>([]);
   const [expanded,    setExpanded]    = useState<string | null>(null);
   const [analytics,   setAnalytics]   = useState({ totalRevenue: 0, totalOrders: 0 });
   const [filterMode,  setFilterMode]  = useState<FilterMode>("all");
@@ -121,8 +124,9 @@ export default function AdminOrders() {
 
   const fetchOrders    = () => apiFetch("/api/orders").then(r => r.json()).then(d => setOrders(Array.isArray(d) ? d : []));
   const fetchAnalytics = () => apiFetch("/api/analytics").then(r => r.json()).then(d => { if (d && !d.error) setAnalytics(d); });
+  const fetchDeletedBills = () => apiFetch("/api/deleted-bills").then(r => r.json()).then(d => setDeletedBills(Array.isArray(d) ? d : []));
 
-  useEffect(() => { fetchOrders(); fetchAnalytics(); }, []);
+  useEffect(() => { fetchOrders(); fetchAnalytics(); fetchDeletedBills(); }, []);
 
   const handleSetReady = async (orderId: string) => {
     await apiFetch(`/api/orders/${orderId}`, {
@@ -149,6 +153,7 @@ export default function AdminOrders() {
     setDeleteId(null);
     fetchOrders();
     fetchAnalytics();
+    fetchDeletedBills();
   };
 
   const filteredOrders = orders
@@ -175,7 +180,54 @@ export default function AdminOrders() {
   return (
     <div className="space-y-6">
 
-      {/* Metrics */}
+      {/* Tabs */}
+      <div className="flex gap-2 border-b border-gray-200">
+        <button onClick={() => setTab("orders")}
+          className={`px-5 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
+            tab === "orders" ? "border-maroon text-maroon" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}>Orders</button>
+        <button onClick={() => setTab("deleted")}
+          className={`px-5 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
+            tab === "deleted" ? "border-red-500 text-red-600" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}>
+          Deleted Bills {deletedBills.length > 0 && <span className="ml-1 bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full">{deletedBills.length}</span>}
+        </button>
+      </div>
+
+      {/* ── Deleted Bills Tab ── */}
+      {tab === "deleted" && (
+        <div className="space-y-3">
+          {deletedBills.length === 0 ? (
+            <div className="bg-white p-8 text-center text-gray-400 rounded-lg border border-gray-100">No deleted bills.</div>
+          ) : deletedBills.map(bill => (
+            <div key={bill.id} className="bg-white rounded-lg border border-red-100 shadow-sm overflow-hidden">
+              <div className="p-4 flex items-center justify-between bg-red-50 border-b border-red-100 flex-wrap gap-2">
+                <div className="flex items-center gap-4 flex-wrap">
+                  <span className="font-bold text-red-700 text-lg">#{bill.id}</span>
+                  <span className="text-gray-500 text-sm">₹{Number(bill.grand_total).toFixed(2)}</span>
+                  <span className="text-xs text-gray-500">{bill.timestamp ? new Date(bill.timestamp).toLocaleString() : "—"}</span>
+                  <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold">DELETED</span>
+                </div>
+                <div className="text-xs text-gray-500 text-right">
+                  <span>Deleted by: <span className="font-semibold text-gray-700">{bill.deleted_by}</span></span>
+                  <span className="ml-3">{bill.deleted_at ? new Date(bill.deleted_at).toLocaleString() : ""}</span>
+                </div>
+              </div>
+              <div className="p-4 text-sm text-gray-600 space-y-1">
+                {(bill.items || []).map((item: any, i: number) => (
+                  <div key={i} className="flex justify-between">
+                    <span>{item.name} x{item.qty}</span>
+                    <span>₹{(item.price * item.qty).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Orders Tab ── */}
+      {tab === "orders" && (<>
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {metrics.map((m, i) => (
           <div key={i} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
@@ -326,6 +378,7 @@ export default function AdminOrders() {
           </div>
         ))}
       </div>
+      </>)}
 
       {/* Delete Confirm Modal */}
       {deleteId && (

@@ -113,7 +113,7 @@ function deriveModule(path: string, method: string): string {
   if (path === "/products" && method === "POST")               return "Inventory";
   if (path.includes("products") || path.includes("product-variants")) return "POS Billing";
   if (path.includes("categories"))                             return "Inventory";
-  if (path.includes("orders"))                                 return "Orders";
+  if (path.includes("orders") || path.includes("deleted-bills")) return "Orders";
   if (path.includes("expenses") || path.includes("dealers"))   return "Financial Reports";
   if (path.includes("employees") || path.includes("attendance") || path.includes("employee-sessions")) return "Employees";
   if (path.includes("settings"))                               return "Settings";
@@ -129,7 +129,8 @@ export async function roleAuthMiddleware(req: Request, res: Response, next: Next
   if (PUBLIC_PATHS.has(cleanPath) || PUBLIC_PATHS.has(req.path)) return next();
   if (req.path === "/auth/forbidden-alert" || cleanPath === "/auth/forbidden-alert") return next();
   if (req.method === "GET" && isPublicMobilePath(req.path)) return next();
-  if (req.method === "POST" && req.path === "/orders" && !req.header("X-Session-Token")) return next();
+  // Allow order creation from both mobile (no token) and authenticated employees (POS billing)
+  if (req.method === "POST" && req.path === "/orders") return next();
   if (req.path === "/reviews" && req.method === "POST") return next();
   if (req.path.startsWith("/reviews/") && req.method === "DELETE") return next();
 
@@ -153,7 +154,12 @@ export async function roleAuthMiddleware(req: Request, res: Response, next: Next
 
   const permissions: Record<string, Record<string, string>> = (db.settings as any)?.permissions?.[role] || {};
   const pathModule = deriveModule(req.path, req.method);
-  const access = (permissions as any)[pathModule] || "Full Access";
+  const access = (permissions as any)[pathModule] ?? "Hidden";
+
+  // Employees can always read their own deleted bills (server scopes by employeeId)
+  if (req.method === "GET" && req.path === "/deleted-bills") return next();
+  // Employees can always delete their own bills (recorded in deleted_bills with their id)
+  if (req.method === "DELETE" && req.path.match(/^\/orders\/[^/]+$/) && session.employeeId) return next();
 
   if (access === "Hidden") {
     broadcast({ type: "FORBIDDEN_ACCESS_ATTEMPT", payload: { path: req.path, role, timestamp: new Date().toISOString() } });

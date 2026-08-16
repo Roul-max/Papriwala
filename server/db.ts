@@ -71,6 +71,7 @@ export const db: any = {
     { id: "g5", title: "Bakery Delights",         url: "https://images.pexels.com/photos/1775043/pexels-photo-1775043.jpeg?auto=compress&cs=tinysrgb&w=600" },
   ],
   banners: [] as any[],
+  deleted_bills: [] as any[],
 };
 
 // ─── Bootstrap: load persisted settings (incl. adminPasswordHash) on startup ─

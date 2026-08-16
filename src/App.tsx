@@ -42,7 +42,7 @@ const ROUTE_MODULE_MAP: Record<string, string> = {
   categories: "Inventory",
   dealer: "Financial Reports",
   report: "Financial Reports",
-  employee: "Orders",
+  employee: "Employees",
   settings: "Settings",
 };
 
@@ -77,8 +77,8 @@ function RoleHomeRedirect() {
     ["Financial Reports", "/admin/dealer"],
     ["Settings",          "/admin/settings"],
   ];
-  const first = moduleRouteMap.find(([mod]) => (rolePerms[mod] || "Full Access") !== "Hidden");
-  return <Navigate to={first ? first[1] : "/admin/dashboard"} replace />;
+  const first = moduleRouteMap.find(([mod]) => (rolePerms[mod] ?? "Hidden") !== "Hidden");
+  return <Navigate to={first ? first[1] : "/admin/pos"} replace />;
 }
 
 // §2.6.1 Granular route guard — blocks hidden routes, alerts admin via API
@@ -89,7 +89,7 @@ function PermissionGuard({ module, children }: { module: string; children: React
 
   const permissions = JSON.parse(localStorage.getItem("accessPermissions") || "{}") as Record<string, Record<string, string>>;
   const rolePerms: Record<string, string> = permissions[role || ""] || {};
-  const access = rolePerms[module] || "Full Access";
+  const access = rolePerms[module] ?? "Hidden";
 
   if (access === "Hidden") {
     fetch("/api/auth/forbidden-alert", {
@@ -105,8 +105,8 @@ function PermissionGuard({ module, children }: { module: string; children: React
       ["Financial Reports", "/admin/dealer"],
       ["Settings",          "/admin/settings"],
     ];
-    const first = moduleRouteMap.find(([mod]) => (rolePerms[mod] || "Full Access") !== "Hidden");
-    return <Navigate to={first ? first[1] : "/admin/dashboard"} replace />;
+    const first = moduleRouteMap.find(([mod]) => (rolePerms[mod] ?? "Hidden") !== "Hidden");
+    return <Navigate to={first ? first[1] : "/admin/pos"} replace />;
   }
   return children;
 }

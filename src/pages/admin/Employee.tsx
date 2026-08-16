@@ -61,10 +61,15 @@ export default function AdminEmployee() {
   useEffect(() => {
     fetchEmployees();
     fetchSessions();
+    // Load roles from localStorage immediately (set by Settings page on save)
+    const cached = localStorage.getItem("accessPermissions");
+    if (cached) {
+      try { setRoles(Object.keys(JSON.parse(cached))); } catch {}
+    }
+    // Always fetch fresh from API to stay in sync
     apiFetch("/api/settings").then(r => r.json()).then(data => {
       const perms = data.permissions || {};
-      const roleNames = Object.keys(perms);
-      if (roleNames.length > 0) setRoles(roleNames);
+      setRoles(Object.keys(perms));
     });
   }, []);
 

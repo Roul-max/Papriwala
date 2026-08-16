@@ -69,7 +69,7 @@ export default function AdminLogin() {
           ["Employees",         "/admin/employee"],
           ["Settings",          "/admin/settings"],
         ];
-        const first = moduleRouteMap.find(([mod]) => (perms[mod] || "Full Access") !== "Hidden");
+        const first = moduleRouteMap.find(([mod]) => (perms[mod] ?? "Hidden") !== "Hidden");
         navigate(first ? first[1] : "/admin/dashboard");
       }
     } catch {

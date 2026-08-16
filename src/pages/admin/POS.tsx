@@ -33,16 +33,9 @@ export default function POS() {
   const [deletedOrders, setDeletedOrders] = useState<any[]>([]);
 
   const fetchDeletedOrders = () =>
-    apiFetch("/api/orders").then(r => r.json()).then((d: any[]) =>
-      setDeletedOrders(Array.isArray(d) ? d.filter(o => o.order_status === "Void" && o.order_source === "Direct POS") : [])
+    apiFetch("/api/deleted-bills").then(r => r.json()).then((d: any[]) =>
+      setDeletedOrders(Array.isArray(d) ? d : [])
     );
-
-  const handleVoidOrder = async (orderId: string) => {
-    if (!confirm("Delete this bill? This cannot be undone.")) return;
-    await apiFetch(`/api/orders/${orderId}/void`, { method: "PATCH" });
-    fetchDeletedOrders();
-    refreshAnalytics();
-  };
 
   // Generate a stable invoice number once per billing session
   const generateInvoiceNo = () => {
@@ -269,8 +262,6 @@ export default function POS() {
     if (discountTotal > 0) { doc.text(`Discount:`, lx, y); doc.text(`-Rs.${discountTotal.toFixed(2)}`, rx, y, { align: "right" }); y += 10; }
     if (otherCharges > 0) { doc.text(`Other Charges:`, lx, y); doc.text(`Rs.${otherCharges.toFixed(2)}`, rx, y, { align: "right" }); y += 10; }
     doc.text(`Tax 5% (incl.):`, lx, y); doc.text(`Rs.${taxes.toFixed(2)}`, rx, y, { align: "right" }); y += 10;
-    doc.setFont("courier", "italic"); doc.setFontSize(6.5);
-    doc.text("[ Tax included in price, not added ]", cx, y, { align: "center" }); y += 10;
     divider();
 
     // Grand Total
@@ -400,7 +391,6 @@ export default function POS() {
       <div class="row"><span>Total Qty: ${totalQty}</span><span>Sub Total: ${subtotal.toFixed(2)}</span></div>
       ${discountRow}${otherRow}
       <div class="row"><span>Tax (5%) incl.</span><span>&#8377;${taxes.toFixed(2)}</span></div>
-      <div class="sub" style="margin:2px 0">[ Tax included in price, not added ]</div>
       ${dash}
       <div class="grand"><span>Grand Total</span><span>&#x20B9;${grandTotal.toFixed(2)}</span></div>
       <div class="sub" style="margin:2px 0">Paid via: ${paymentMode}</div>
@@ -475,8 +465,8 @@ export default function POS() {
                 <th className="py-3 px-4">Date</th>
                 <th className="py-3 px-4">Items</th>
                 <th className="py-3 px-4">Total</th>
-                <th className="py-3 px-4">Voided By</th>
-                <th className="py-3 px-4">Voided At</th>
+                <th className="py-3 px-4">Deleted By</th>
+                <th className="py-3 px-4">Deleted At</th>
               </tr>
             </thead>
             <tbody>
@@ -487,8 +477,8 @@ export default function POS() {
                   <td className="py-3 px-4 text-xs text-gray-500">{o.timestamp ? new Date(o.timestamp).toLocaleString() : "—"}</td>
                   <td className="py-3 px-4 text-xs text-gray-600">{o.items?.map((i: any) => `${i.name} x${i.qty}`).join(", ") || "—"}</td>
                   <td className="py-3 px-4 font-bold text-gray-700">₹{Number(o.grand_total).toFixed(2)}</td>
-                  <td className="py-3 px-4 text-xs text-gray-500">{o.voided_by || "—"}</td>
-                  <td className="py-3 px-4 text-xs text-gray-400">{o.voided_at ? new Date(o.voided_at).toLocaleString() : "—"}</td>
+                  <td className="py-3 px-4 text-xs text-gray-500">{o.deleted_by || "—"}</td>
+                  <td className="py-3 px-4 text-xs text-gray-400">{o.deleted_at ? new Date(o.deleted_at).toLocaleString() : "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -682,7 +672,7 @@ export default function POS() {
               });
               const saved = await res.json();
               if (saved?.id) {
-                await apiFetch(`/api/orders/${saved.id}/void`, { method: "PATCH" });
+                await apiFetch(`/api/orders/${saved.id}`, { method: "DELETE" });
               }
               setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
               generateInvoiceNo();

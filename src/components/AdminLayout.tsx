@@ -220,7 +220,7 @@ export default function AdminLayout() {
   const role        = localStorage.getItem("adminRole") || "";
   const permissions = JSON.parse(localStorage.getItem("accessPermissions") || "{}") as Record<string, Record<string, string>>;
   const rolePerms   = permissions[role] || {};
-  const canSee      = (module: string) => role === "Admin" || (rolePerms[module] || "Full Access") !== "Hidden";
+  const canSee      = (module: string) => role === "Admin" || (rolePerms[module] ?? "Hidden") !== "Hidden";
 
   const goTo = (path: string, requiredModule: string | null) => {
     if (requiredModule && !canSee(requiredModule)) {
@@ -294,14 +294,16 @@ export default function AdminLayout() {
   );
 
   const isEmployee = role !== "Admin";
-  const navItems = isEmployee ? [] : ALL_NAV_ITEMS.filter(item => item.module === null || canSee(item.module));
+  const navItems = ALL_NAV_ITEMS.filter(item => {
+    if (item.module === null) return role === "Admin";
+    return canSee(item.module);
+  });
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-screen w-full bg-cream">
 
-      {/* Sidebar — hidden for employees */}
-      {!isEmployee && (
+      {/* Sidebar */}
       <aside className="w-64 bg-maroon text-cream-light flex flex-col fixed h-full z-10">
         <div className="p-6 text-center border-b border-maroon-light select-none">
           <div className="w-20 h-20 rounded-full border-2 border-gold mx-auto mb-3 flex items-center justify-center bg-cream-light overflow-hidden">
@@ -335,22 +337,18 @@ export default function AdminLayout() {
           ))}
         </nav>
       </aside>
-      )}
 
       {/* Main area */}
-      <div className={`flex-1 ${!isEmployee ? "ml-64" : ""} flex flex-col h-full overflow-hidden`}>
+      <div className="flex-1 ml-64 flex flex-col h-full overflow-hidden">
 
         {/* Header */}
         <header
-          style={{ position: "fixed", top: 0, left: isEmployee ? "0" : "256px", width: isEmployee ? "100vw" : "calc(100vw - 256px)", zIndex: 9999 }}
+          style={{ position: "fixed", top: 0, left: "256px", width: "calc(100vw - 256px)", zIndex: 9999 }}
           className="h-16 bg-cream border-b border-gold/20 flex items-center justify-between px-6"
         >
           <div className="flex items-center gap-3">
-            {isEmployee && (
-              <img src="/Logo.png" alt="Logo" className="w-9 h-9 object-contain" />
-            )}
             <h2 className="font-serif text-2xl text-maroon font-semibold capitalize">
-              {isEmployee ? "POS Billing" : (location.pathname.split("/").pop()?.replace("-", " ") || "Dashboard")}
+              {location.pathname.split("/").pop()?.replace("-", " ") || "Dashboard"}
             </h2>
           </div>
 

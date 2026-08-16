@@ -451,10 +451,55 @@ router.patch("/orders/:id", async (req, res) => {
 });
 
 router.delete("/orders/:id", async (req, res) => {
+  const session = (req as any).session;
+  const orders = await dbSelect("orders", db.orders);
+  let order = orders.find((o: any) => o.id === req.params.id);
+  // Fallback: fetch directly from Supabase in case in-memory is stale
+  if (!order && supabase) {
+    const { data } = await supabase.from("orders").select("*").eq("id", req.params.id).maybeSingle();
+    if (data) order = data;
+  }
+  if (!order) return res.status(404).json({ error: "Not found" });
+
+  if (!db.deleted_bills) db.deleted_bills = [];
+  const deletedRow = {
+    id: order.id,
+    order_source: order.order_source || null,
+    order_status: order.order_status || null,
+    payment_mode: order.payment_mode || null,
+    items: order.items || null,
+    grand_total: order.grand_total || 0,
+    discount_applied: order.discount_applied || 0,
+    tax_collected: order.tax_collected || 0,
+    extraneous_charges: order.extraneous_charges || 0,
+    other_charges_desc: order.other_charges_desc || null,
+    created_by: order.created_by || null,
+    timestamp: order.timestamp || null,
+    deleted_by: session?.name || "Unknown",
+    deleted_by_id: session?.employeeId || null,
+    deleted_at: new Date().toISOString(),
+  };
+  console.log("[DELETE /orders] saving to deleted_bills:", JSON.stringify({ id: deletedRow.id, deleted_by: deletedRow.deleted_by, deleted_by_id: deletedRow.deleted_by_id }));
+  const insertResult = await dbInsert("deleted_bills", deletedRow, db.deleted_bills);
+  console.log("[DELETE /orders] dbInsert result:", JSON.stringify(insertResult));
+
   await dbDelete("orders", req.params.id);
   const idx = db.orders.findIndex((o: any) => o.id === req.params.id);
   if (idx !== -1) db.orders.splice(idx, 1);
   res.json({ success: true });
+});
+
+// ─── Deleted Bills ────────────────────────────────────────────────────────────
+router.get("/deleted-bills", async (req: any, res) => {
+  if (!db.deleted_bills) db.deleted_bills = [];
+  const all = await dbSelect("deleted_bills", db.deleted_bills);
+  const sorted = all.sort((a: any, b: any) => new Date(b.deleted_at).getTime() - new Date(a.deleted_at).getTime());
+  const session = req.session;
+  // Employees only see their own deleted bills; Admin sees all
+  if (session?.employeeId) {
+    return res.json(sorted.filter((b: any) => b.deleted_by_id === session.employeeId));
+  }
+  res.json(sorted);
 });
 
 // ─── Void (soft-delete) an order ─────────────────────────────────────────────
