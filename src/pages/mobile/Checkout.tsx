@@ -7,6 +7,7 @@ import { apiFetch } from "../../lib/apiFetch";
 export default function Checkout() {
   const navigate = useNavigate();
   const { total, items, clearCart } = useCart();
+  const tax = total * (5 / 105);
   const [method, setMethod] = useState("upi");
   const [success, setSuccess] = useState(false);
   const [orderError, setOrderError] = useState("");
