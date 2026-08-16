@@ -47,7 +47,7 @@ export default function MobileLayout() {
     <div className="mobile-portal flex flex-col w-full max-w-md mx-auto bg-cream-light font-sans relative shadow-2xl sm:border-x sm:border-gray-200" style={{ height: '100dvh' }}>
 
       {/* Top Header */}
-      <header className="bg-maroon text-cream flex items-center justify-between p-4 shrink-0 z-20" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1rem)', marginTop: '-1rem' }}>
+      <header className="bg-maroon text-cream flex items-center justify-between p-4 shrink-0 z-20" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1rem)' }}>
         <button onClick={() => setSidebarOpen(true)} className="p-1"><Menu size={24} /></button>
         <img src="/Logo.png" alt="Logo" className="w-12 h-12 object-contain absolute left-1/2 -translate-x-1/2" />
         <Link to="/profile" className="p-1">
