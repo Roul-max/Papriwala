@@ -3,6 +3,7 @@ import { Search, Plus, Trash2, Printer, ShoppingCart, X, FileDown, EyeOff } from
 import jsPDF from "jspdf";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
+import { usePrinter } from "../../hooks/usePrinter";
 
 export default function POS() {
   const [products, setProducts] = useState<any[]>([]);
@@ -45,6 +46,7 @@ export default function POS() {
 
   const access = useAccess("POS Billing");
   const isReadOnly = access === "Read-Only";
+  const { printReceipt, openCashDrawer } = usePrinter();
 
   const refreshAnalytics = () => {
     const istOffset = 5.5 * 60 * 60 * 1000;
@@ -432,7 +434,16 @@ export default function POS() {
       alert(msg);
       return;
     }
-    handlePrint();
+    const isCash = paymentMode === "Cash";
+    const result = await printReceipt(
+      { invoiceNo, cashier: createdBy, paymentMode, items: cart, subtotal, discountTotal, taxes, grandTotal, otherCharges },
+      isCash // open cash drawer only for cash payments
+    );
+    if (result.fallback) {
+      // QZ Tray not running — fall back to browser print
+      handlePrint();
+      if (isCash) openCashDrawer();
+    }
     printSubBills(invoiceNo);
     setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
     generateInvoiceNo();

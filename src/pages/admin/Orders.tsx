@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { ChevronDown, ChevronUp, Check, Clock, MessageCircle, EyeOff, Filter, Printer, Trash2, X } from "lucide-react";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
+import { usePrinter } from "../../hooks/usePrinter";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -121,6 +122,21 @@ export default function AdminOrders() {
 
   const access     = useAccess("Orders");
   const isReadOnly = access === "Read-Only";
+  const { printReceipt } = usePrinter();
+
+  const handlePrintOrder = async (order: Order) => {
+    const result = await printReceipt({
+      invoiceNo: order.id,
+      cashier: order.created_by || "Admin",
+      paymentMode: (order as any).payment_method || order.payment_mode || "—",
+      items: order.items,
+      subtotal: Number(order.grand_total) + Number(order.discount_applied || 0),
+      discountTotal: Number(order.discount_applied || 0),
+      taxes: Number(order.tax_collected || 0),
+      grandTotal: Number(order.grand_total),
+    });
+    if (result.fallback) printOrder(order);
+  };
 
   const fetchOrders    = () => apiFetch("/api/orders").then(r => r.json()).then(d => setOrders(Array.isArray(d) ? d : []));
   const fetchAnalytics = () => apiFetch("/api/analytics").then(r => r.json()).then(d => { if (d && !d.error) setAnalytics(d); });
@@ -290,7 +306,7 @@ export default function AdminOrders() {
                     <EyeOff size={12} /> Read-Only
                   </span>
                 )}
-                <button onClick={() => printOrder(order)}
+                <button onClick={() => handlePrintOrder(order)}
                   className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1">
                   <Printer size={13} /> Print
                 </button>
