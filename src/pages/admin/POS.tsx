@@ -444,7 +444,7 @@ export default function POS() {
       handlePrint();
       if (isCash) openCashDrawer();
     }
-    printSubBills(invoiceNo);
+    // printSubBills removed — sub-bill popup was causing second print dialog
     setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
     generateInvoiceNo();
     refreshAnalytics();

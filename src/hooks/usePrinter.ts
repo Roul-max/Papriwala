@@ -205,7 +205,9 @@ export function usePrinter() {
         data.push("\x1B\x70\x00\x19\xFA");
       }
 
-      await qz.print(config, [{ type: "raw", format: "plain", data: data.join("") }]);
+      const rawStr = data.join("");
+      const b64 = btoa(unescape(encodeURIComponent(rawStr)));
+      await qz.print(config, [{ type: "raw", format: "base64", data: b64 }]);
       return { ok: true };
     } catch (e: any) {
       console.error("[usePrinter] QZ print error:", e?.message);
@@ -219,7 +221,7 @@ export function usePrinter() {
     try {
       const printerName = PRINTER_NAME || await qz.printers.getDefault();
       const config = qz.configs.create(printerName);
-      await qz.print(config, [{ type: "raw", format: "plain", data: "\x1B\x70\x00\x19\xFA" }]);
+      await qz.print(config, [{ type: "raw", format: "base64", data: btoa("\x1B\x70\x00\x19\xFA") }]);
     } catch {}
   };
 
