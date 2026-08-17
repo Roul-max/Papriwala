@@ -58,23 +58,10 @@ hcYye0eAtiHk/u3/73ebCz9N0HuzigOKYilwp8AA7aFFupe001IJbSaigUgmRxUx
 0egK87STUy5ZVunNEqs5a9w8
 -----END PRIVATE KEY-----`;
 
-declare const qz: any;
-
-function loadQzScript(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (typeof qz !== "undefined") { resolve(); return; }
-    const s = document.createElement("script");
-    s.src = "https://cdn.jsdelivr.net/npm/qz-tray@2.2.6/qz-tray.js";
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error("Failed to load QZ Tray script"));
-    document.head.appendChild(s);
-  });
-}
+import qz from "qz-tray";
 
 async function connectQz(): Promise<boolean> {
   try {
-    await loadQzScript();
-
     qz.security.setCertificatePromise((resolve: any) => resolve(QZ_CERT));
     qz.security.setSignaturePromise((toSign: any) => {
       return (resolve: any, reject: any) => {
