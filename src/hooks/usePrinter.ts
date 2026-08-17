@@ -71,7 +71,7 @@ async function connectQz(): Promise<boolean> {
         const binaryKey = Uint8Array.from(atob(keyData), c => c.charCodeAt(0));
         crypto.subtle.importKey(
           "pkcs8", binaryKey.buffer,
-          { name: "RSASSA-PKCS1-v1_5", hash: "SHA-512" },
+          { name: "RSASSA-PKCS1-v1_5", hash: "SHA-1" },
           false, ["sign"]
         ).then(key => {
           const encoder = new TextEncoder();
