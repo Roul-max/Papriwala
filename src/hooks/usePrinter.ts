@@ -2,7 +2,7 @@
 // Requires QZ Tray installed on the billing PC: https://qz.io
 // Set PRINTER_NAME below to match your exact Windows printer name (Devices & Printers)
 
-const PRINTER_NAME = "POS-80C";
+const PRINTER_NAME = "POS-80C (copy 1)";
 
 const QZ_CERT = `-----BEGIN CERTIFICATE-----
 MIIECzCCAvOgAwIBAgIGAaAPtyV8MA0GCSqGSIb3DQEBCwUAMIGiMQswCQYDVQQG
