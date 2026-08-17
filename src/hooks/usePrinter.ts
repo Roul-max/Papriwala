@@ -23,7 +23,7 @@ async function connectQz(): Promise<boolean> {
 
     // Must set security BEFORE connect — resolve with empty string to skip cert check
     qz.security.setCertificatePromise((resolve: any) => resolve(""));
-    qz.security.setSignaturePromise((_toSign: any, resolve: any) => resolve(""));
+    qz.security.setSignaturePromise((_toSign: any) => Promise.resolve(""));
 
     if (!qz.websocket.isActive()) {
       await qz.websocket.connect({ retries: 2, delay: 1 });
