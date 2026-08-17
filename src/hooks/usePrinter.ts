@@ -20,6 +20,12 @@ function loadQzScript(): Promise<void> {
 async function connectQz(): Promise<boolean> {
   try {
     await loadQzScript();
+
+    // Bypass certificate check — required when app is served over HTTPS
+    qz.security.setCertificatePromise((_resolve: any, reject: any) => reject());
+    qz.security.setSignatureAlgorithm("SHA512");
+    qz.security.setSignaturePromise(() => () => Promise.resolve());
+
     if (!qz.websocket.isActive()) {
       await qz.websocket.connect({ retries: 2, delay: 1 });
     }
