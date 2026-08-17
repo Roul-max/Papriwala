@@ -2,7 +2,61 @@
 // Requires QZ Tray installed on the billing PC: https://qz.io
 // Set PRINTER_NAME below to match your exact Windows printer name (Devices & Printers)
 
-const PRINTER_NAME = "POS-80C"; // e.g. "EPSON TM-T82" — leave empty to use QZ default printer
+const PRINTER_NAME = "POS-80C";
+
+const QZ_CERT = `-----BEGIN CERTIFICATE-----
+MIIECzCCAvOgAwIBAgIGAaAPXccWMA0GCSqGSIb3DQEBCwUAMIGiMQswCQYDVQQG
+EwJVUzELMAkGA1UECAwCTlkxEjAQBgNVBAcMCUNhbmFzdG90YTEbMBkGA1UECgwS
+UVogSW5kdXN0cmllcywgTExDMRswGQYDVQQLDBJRWiBJbmR1c3RyaWVzLCBMTEMx
+HDAaBgkqhkiG9w0BCQEWDXN1cHBvcnRAcXouaW8xGjAYBgNVBAMMEVFaIFRyYXkg
+RGVtbyBDZXJ0MB4XDTI2MDgxNjEwNTYzOVoXDTQ2MDgxNjEwNTYzOVowgaIxCzAJ
+BgNVBAYTAlVTMQswCQYDVQQIDAJOWTESMBAGA1UEBwwJQ2FuYXN0b3RhMRswGQYD
+VQQKDBJRWiBJbmR1c3RyaWVzLCBMTEMxGzAZBgNVBAsMElFaIEluZHVzdHJpZXMs
+IExMQzEcMBoGCSqGSIb3DQEJARYNc3VwcG9ydEBxei5pbzEaMBgGA1UEAwwRUVog
+VHJheSBEZW1vIENlcnQwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC1
+OjiKH1z9bjacJK24dkroJLESmYqjTyryctwmTxeQaTKgjBSGLzxGkHDll8iM6D7W
+ScKeFxw0i36VdSGZ1/VoMi8LkLVQ7B3GPjJeeH032g6sMUBgDNy8LVN+A6+EBz+k
+iwu8vTVYIWcuJq0jDxYfq45vKLBNU5iDKwRoKvmzpI8CmC58rsBH4rWtMpbwaONI
+kQ6DeymO2STJueTHmmS4L+fw/fyjg0LVlHIsNoQVbTt0mJH/9cwfk9490RCVoV8y
+eyuhHM/C2ofGfimEfF7nQQnvtBlSUuMra1RKtxKeUjFmlaFLn4sJT/gy7ZXuK6Y5
+ISqUEtHN/UWyWMdeTUo/AgMBAAGjRTBDMBIGA1UdEwEB/wQIMAYBAf8CAQEwDgYD
+VR0PAQH/BAQDAgEGMB0GA1UdDgQWBBTap4Xcj+ctJUyAZvbHi2UOLzRPPTANBgkq
+hkiG9w0BAQsFAAOCAQEADOPbgQZF3ym0Hea1sGcyTTMT1qmH1D0yU1Q4XpvsTkvH
+4c4Gf2rpWwWQEgvQuGR7mu4iidyIWxasWMj8Ok0yXc93BbU8xQsB/EwyTEhUdEHP
+N60DfmEn9QGgmDykTN5Pe+CAz8F8t1jtBrEEaRs2y8MQHBJFL4k0Jlao7IxRrs6/
+VI27frG+SMw0qeGqzPPQmjGN1B3ttOxCf6qVWRJ3Mn9sLx9/Eug4KWf2IlAMTedW
+bf+ObcsbWVG6/N2jUwukdUlQtsAESq04Ku8OojJejWTw9VeyqN4DxHFADRbQRDUt
+Rn4AG4ac2sG0hhBUAkKNew8QwE1oUoVsh1U95MIKMg==
+-----END CERTIFICATE-----`;
+
+const QZ_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC1OjiKH1z9bjac
+JK24dkroJLESmYqjTyryctwmTxeQaTKgjBSGLzxGkHDll8iM6D7WScKeFxw0i36V
+dSGZ1/VoMi8LkLVQ7B3GPjJeeH032g6sMUBgDNy8LVN+A6+EBz+kiwu8vTVYIWcu
+Jq0jDxYfq45vKLBNU5iDKwRoKvmzpI8CmC58rsBH4rWtMpbwaONIkQ6DeymO2STJ
+ueTHmmS4L+fw/fyjg0LVlHIsNoQVbTt0mJH/9cwfk9490RCVoV8yeyuhHM/C2ofG
+fimEfF7nQQnvtBlSUuMra1RKtxKeUjFmlaFLn4sJT/gy7ZXuK6Y5ISqUEtHN/UWy
+WMdeTUo/AgMBAAECggEAAe3KPbtwqGZoXoYDjKmpYxtGvERpKQIU50VwfgLSsbdj
+UfUyH8s6HEZs45bTP2wnhO1LHf0atr9kAVE6TTFZTg4AjLeQCr5AFDXhqNPhvZJf
+2CNVyu/rTyBbk1Y/X0D4fywsfb2S3qRlcGjpGz4WMocphLvk3YzDOg+BWaK/McIz
+bM/MXR6MnER9kyIvYbuIxXTsXdBeX+mGRZTVPD+HVhmCyQF1RlRwq6oBd5V8tOpX
+9i+PBVf1fPbSDQohnkTIXvvGvky/8/ueFkNZQUb5KtpRZGQSvp7bl1H719CUMSxN
+XLZdpVvqWbqlFzLELm9rInZQD18cvaU8amzflI/aQQKBgQDmnlUR9LKtGoJKz7C9
+pc4BWBNZ80hIoMKusXDWFkznxrAv6uxLOmglfErtLlqjO+jI7PdMSGyB7h0vhoQA
+V+SnsK28iRgswfDMJQQGCZZ5lJvhUiDrmhhdQbuJ50yUw/z8Os4k901aSXtRFg1L
+AIuiEdKVA7Ebl4xEsZiEGUnVHwKBgQDJLEwTUBWrPAtaonuRPcpiWK+7b+bD9KhQ
+4++l8X5IAq6XXb5aT9aOt0MV3ZQ6ykGAWu7nexXXkXtZpWXHTfVkhtyt7Ap3CUql
+bxYMi3n0aNR8cvQd4SMHxKcRvDMFo4psUI4spJZp42halo4Q5DrOfe2G7RkTkgfS
+UlD76Q3G4QKBgQCIuFNMutn2v+GAgpKQTCzOJS4LxKwUyqHAOVfgxAXB3svzDH4b
+tzupBX/SDwoS/eBqxflyUvlpKgZJd6DoJzNaqubFAC3B0xRzono5LhP0bkLfmPYF
+VyyclOyeu+5tv6dKzX4K8kX8gdXG46Dr1x3w7kn+p9qmtfilfPgjUG6yFwKBgEF9
+eTqkTJmVD4Eu+hkbS4Jeqr7TPAW45P6IZaDZECozLVE7hFd0PD3zrRQ2MSY+Z7p4
+X+PdrwuhYc2aSZrrZyKVwMuh1vpPfQyEMGJfGZGWeu4UoiIEA9poi5b7dIS2a769
+LrubzReln3g2IQOguQA2AJh3IT28wW0XvSN1CDYhAoGBANmnZDbL+hdfsKyNr4l+
+78odFR2BkylTNDGBghx5ZYRiWA9Q/+m4+/cjxNVt/1iBFXYFLdJC1Cz3OAzB8HEJ
+DyE32V7IKFYbmNCDbjj+G+L0CjVzCKfyK+Q2ZYN3aLn+mJJm8+rfA6ihOdcLDJdu
+pYHtfbjnWE6wdH1Qp2s2LD5a
+-----END PRIVATE KEY-----`;
 
 declare const qz: any;
 
@@ -10,7 +64,7 @@ function loadQzScript(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof qz !== "undefined") { resolve(); return; }
     const s = document.createElement("script");
-    s.src = "https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js";
+    s.src = "https://cdn.jsdelivr.net/npm/qz-tray@2.2.6/qz-tray.js";
     s.onload = () => resolve();
     s.onerror = () => reject(new Error("Failed to load QZ Tray script"));
     document.head.appendChild(s);
@@ -21,9 +75,25 @@ async function connectQz(): Promise<boolean> {
   try {
     await loadQzScript();
 
-    // Must set security BEFORE connect — resolve with empty string to skip cert check
-    qz.security.setCertificatePromise((resolve: any) => resolve(""));
-    qz.security.setSignaturePromise(() => (_toSign: any, resolve: any) => resolve(""));
+    qz.security.setCertificatePromise((resolve: any) => resolve(QZ_CERT));
+    qz.security.setSignaturePromise((toSign: any) => {
+      return (resolve: any, reject: any) => {
+        const keyData = QZ_PRIVATE_KEY
+          .replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----/g, "")
+          .replace(/\s+/g, "");
+        const binaryKey = Uint8Array.from(atob(keyData), c => c.charCodeAt(0));
+        crypto.subtle.importKey(
+          "pkcs8", binaryKey.buffer,
+          { name: "RSASSA-PKCS1-v1_5", hash: "SHA-512" },
+          false, ["sign"]
+        ).then(key => {
+          const encoder = new TextEncoder();
+          return crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, encoder.encode(toSign));
+        }).then(sig => {
+          resolve(btoa(String.fromCharCode(...new Uint8Array(sig))));
+        }).catch(reject);
+      };
+    });
 
     if (!qz.websocket.isActive()) {
       await qz.websocket.connect({ retries: 2, delay: 1 });
