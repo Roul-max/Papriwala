@@ -32,6 +32,7 @@ export default function POS() {
   const [invoiceNo, setInvoiceNo] = useState("");
   const [posTab, setPosTab] = useState<"billing" | "deleted">("billing");
   const [deletedOrders, setDeletedOrders] = useState<any[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchDeletedOrders = () =>
     apiFetch("/api/deleted-bills").then(r => r.json()).then((d: any[]) =>
@@ -419,35 +420,40 @@ export default function POS() {
   };
 
   const handlePlaceAndPrint = async () => {
-    if (cart.length === 0) return;
-    const createdBy = localStorage.getItem("adminName") || "Admin";
-    const res = await apiFetch("/api/orders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: paymentMode, items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, created_by: createdBy })
-    });
-    if (!res.ok) {
-      const data = await res.json();
-      const msg = data.items?.length
-        ? `Not enough stock:\n${data.items.join("\n")}`
-        : (data.error || "Failed to place order.");
-      alert(msg);
-      return;
+    if (cart.length === 0 || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const createdBy = localStorage.getItem("adminName") || "Admin";
+      const res = await apiFetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: paymentMode, items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, created_by: createdBy })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        const msg = data.items?.length
+          ? `Not enough stock:\n${data.items.join("\n")}`
+          : (data.error || "Failed to place order.");
+        alert(msg);
+        return;
+      }
+      // Clear cart immediately after successful order — before print
+      const cartSnapshot = [...cart];
+      setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
+      generateInvoiceNo();
+      refreshAnalytics();
+      const isCash = paymentMode === "Cash";
+      const result = await printReceipt(
+        { invoiceNo, cashier: createdBy, paymentMode, items: cartSnapshot, subtotal, discountTotal, taxes, grandTotal, otherCharges },
+        isCash
+      );
+      if (result.fallback) {
+        handlePrint();
+        if (isCash) openCashDrawer();
+      }
+    } finally {
+      setIsSubmitting(false);
     }
-    const isCash = paymentMode === "Cash";
-    const result = await printReceipt(
-      { invoiceNo, cashier: createdBy, paymentMode, items: cart, subtotal, discountTotal, taxes, grandTotal, otherCharges },
-      isCash // open cash drawer only for cash payments
-    );
-    if (result.fallback) {
-      // QZ Tray not running — fall back to browser print
-      handlePrint();
-      if (isCash) openCashDrawer();
-    }
-    // printSubBills removed — sub-bill popup was causing second print dialog
-    setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
-    generateInvoiceNo();
-    refreshAnalytics();
   };
 
   const ribbonCards = [
@@ -668,23 +674,19 @@ export default function POS() {
               ))}
             </div>
             {/* Place & Print — single combined button */}
-            <button onClick={handlePlaceAndPrint} disabled={isReadOnly || cart.length === 0}
+            <button onClick={handlePlaceAndPrint} disabled={isReadOnly || cart.length === 0 || isSubmitting}
               className="w-full bg-maroon hover:bg-maroon-light text-white font-bold py-2.5 rounded text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-              <Printer size={14} /> Place &amp; Print
+              <Printer size={14} /> {isSubmitting ? "Processing..." : "Place & Print"}
             </button>
             <button onClick={async () => {
               if (cart.length === 0) return;
               if (!confirm("Delete this bill? Cart will be cleared.")) return;
               const createdBy = localStorage.getItem("adminName") || "Admin";
-              const res = await apiFetch("/api/orders", {
+              await apiFetch("/api/deleted-bills", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: paymentMode, items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, created_by: createdBy })
+                body: JSON.stringify({ items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, payment_mode: paymentMode, created_by: createdBy })
               });
-              const saved = await res.json();
-              if (saved?.id) {
-                await apiFetch(`/api/orders/${saved.id}`, { method: "DELETE" });
-              }
               setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
               generateInvoiceNo();
               fetchDeletedOrders();

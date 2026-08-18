@@ -58,11 +58,17 @@ Nh2lLUARvceHpbBzb2H82eEcrhcmwhNQ/TwNDbcb1Xl1vXDDXygQjKL9QPcM6sRx
 DuWHBlSTxgY62AI/TkUD
 -----END PRIVATE KEY-----`;
 
+import React from "react";
 import qz from "qz-tray";
+
+let qzConnecting = false;
 
 async function connectQz(): Promise<boolean> {
   try {
-    qz.security.setCertificatePromise((resolve: any) => resolve(QZ_CERT));
+    // Set cert + signature only once
+    if (!qz.security.getCertificatePromise?.()) {
+      qz.security.setCertificatePromise((resolve: any) => resolve(QZ_CERT));
+    }
     qz.security.setSignaturePromise((toSign: any) => {
       return (resolve: any, reject: any) => {
         const keyData = QZ_PRIVATE_KEY
@@ -82,11 +88,25 @@ async function connectQz(): Promise<boolean> {
       };
     });
 
-    if (!qz.websocket.isActive()) {
-      await qz.websocket.connect({ retries: 2, delay: 1 });
+    if (qz.websocket.isActive()) return true;
+    if (qzConnecting) {
+      // Wait up to 5s for an in-progress connection
+      for (let i = 0; i < 50; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        if (qz.websocket.isActive()) return true;
+      }
+      return false;
     }
-    return true;
-  } catch {
+    qzConnecting = true;
+    try {
+      await qz.websocket.connect({ retries: 3, delay: 1 });
+      return true;
+    } finally {
+      qzConnecting = false;
+    }
+  } catch (e: any) {
+    qzConnecting = false;
+    console.warn("[QZ] Not connected:", e?.message);
     return false;
   }
 }
@@ -143,14 +163,12 @@ function buildReceiptData(params: {
   const data: string[] = [
     INIT,
     CENTER, BOLD_ON, DOUBLE_ON,
-    "Shri Badrinarayan\n",
-    DOUBLE_OFF,
-    "Papriwale\n",
-    BOLD_OFF,
-    "Sweets | Namkeen | Bakery\n",
-    "Main Road, Buxar, Bihar - 802101\n",
-    "Ph: +91 9876543210\n",
-    "GST: 10AAAAA0000A1Z5\n",
+    "BADRINARAYAN PAPRIWALE\n",
+    DOUBLE_OFF, BOLD_OFF,
+    "Sweets | Papri | Namkeen | Dosa\n",
+    "Main Road Golambar Buxar,\n",
+    "Bihar - 802103\n",
+    "GST: 10DLRPG9097N1ZB\n",
     LEFT,
     divider,
     pad(`Date: ${date}`, `Time: ${time}`) + "\n",
@@ -184,6 +202,13 @@ function buildReceiptData(params: {
 
 // Main hook
 export function usePrinter() {
+  // Eagerly connect to QZ Tray on mount so it's ready before first print
+  React.useEffect(() => {
+    connectQz().then(ok => {
+      if (ok) console.log("[QZ] Connected and ready.");
+      else console.warn("[QZ] Not available — will use browser print fallback.");
+    });
+  }, []);
   const printReceipt = async (
     params: Parameters<typeof buildReceiptData>[0],
     openDrawer = false

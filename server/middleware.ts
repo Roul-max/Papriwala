@@ -158,6 +158,8 @@ export async function roleAuthMiddleware(req: Request, res: Response, next: Next
 
   // Employees can always read their own deleted bills (server scopes by employeeId)
   if (req.method === "GET" && req.path === "/deleted-bills") return next();
+  // Employees can always post to deleted-bills (void/abandoned carts)
+  if (req.method === "POST" && req.path === "/deleted-bills") return next();
   // Employees can always delete their own bills (recorded in deleted_bills with their id)
   if (req.method === "DELETE" && req.path.match(/^\/orders\/[^/]+$/) && session.employeeId) return next();
 

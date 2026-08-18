@@ -378,41 +378,85 @@ router.get("/orders", async (req, res) => {
 router.post("/orders", async (req, res) => {
   const session = (req as any).session;
 
-  // ── Stock validation before placing order ────────────────────────────────
+  // ── Fetch fresh products from Supabase (source of truth) ─────────────────
   const products = await dbSelect("products", db.products);
+
+  // ── Skip stock deduction for Void orders (abandoned carts) ─────────────
+  const isVoid = req.body.order_status === "Void";
+
+  // ── Stock validation ──────────────────────────────────────────────────────
   const insufficientItems: string[] = [];
-  for (const item of (req.body.items || [])) {
+  for (const item of (isVoid ? [] : (req.body.items || []))) {
     const qty = Number(item.qty);
     if (!qty || qty <= 0) continue;
-    const product = products.find((p: any) => p.name?.toLowerCase() === item.name?.toLowerCase());
+    const product = products.find((p: any) =>
+      (item.product_id && p.id === item.product_id) ||
+      p.name?.toLowerCase() === item.name?.toLowerCase()
+    );
     if (!product) continue;
-    if (product.current_stock_qty < qty) {
+    if (product.current_stock_qty < qty)
       insufficientItems.push(`${product.name} (available: ${product.current_stock_qty}, requested: ${qty})`);
-    }
   }
   if (insufficientItems.length > 0)
     return res.status(400).json({ error: "Insufficient stock", items: insufficientItems });
 
   const ts = Date.now();
   const newOrder = {
-    ...req.body,
     id: `INV-${new Date().getFullYear()}-${ts.toString().slice(-6)}`,
+    order_source: req.body.order_source || null,
+    order_status: req.body.order_status || "Paid",
+    payment_mode: req.body.payment_mode || null,
+    items: req.body.items || [],
+    grand_total: req.body.grand_total || 0,
+    discount_applied: req.body.discount_applied || 0,
+    tax_collected: req.body.tax_collected || 0,
+    extraneous_charges: req.body.extraneous_charges || 0,
+    other_charges_desc: req.body.other_charges_desc || null,
+    created_by: req.body.created_by || null,
+    customer_id: req.body.customer_id || null,
+    customer_phone: req.body.customer_phone || null,
+    table_id: req.body.table_id || null,
     timestamp: new Date().toISOString(),
   };
   const saved = await dbInsert("orders", newOrder, db.orders);
 
-  // ── Deduct stock for each item in the order ───────────────────────────────
-  for (const item of (saved.items || [])) {
+  // ── Atomic stock deduction — skipped for Void (abandoned cart) orders ──────
+  for (const item of (isVoid ? [] : (saved.items || []))) {
     const qty = Number(item.qty);
     if (!qty || qty <= 0) continue;
+
     const product = products.find((p: any) =>
+      (item.product_id && p.id === item.product_id) ||
       p.name?.toLowerCase() === item.name?.toLowerCase()
     );
     if (!product) continue;
-    const newQty = Math.max(0, Number(product.current_stock_qty) - qty);
-    await dbUpdate("products", product.id, { current_stock_qty: newQty });
+
+    let newQty: number;
+
+    if (supabase) {
+      // Atomic decrement with floor at 0 — prevents negative stock and race conditions
+      const { data, error } = await supabase.rpc("decrement_stock", {
+        p_id: product.id,
+        p_qty: qty,
+      });
+      if (error) {
+        // rpc not available — fall back to safe update
+        const fresh = await supabase.from("products").select("current_stock_qty").eq("id", product.id).single();
+        const currentQty = Number(fresh.data?.current_stock_qty ?? product.current_stock_qty);
+        newQty = Math.max(0, currentQty - qty);
+        await supabase.from("products").update({ current_stock_qty: newQty }).eq("id", product.id);
+      } else {
+        newQty = Number(data) ?? Math.max(0, product.current_stock_qty - qty);
+      }
+    } else {
+      newQty = Math.max(0, Number(product.current_stock_qty) - qty);
+      await dbUpdate("products", product.id, { current_stock_qty: newQty });
+    }
+
+    // Sync in-memory
     const local = db.products.find((p: any) => p.id === product.id);
     if (local) local.current_stock_qty = newQty;
+
     await dbInsert("inventory_log", {
       id: crypto.randomUUID(),
       type: "STOCK_OUT",
@@ -423,7 +467,7 @@ router.post("/orders", async (req, res) => {
       operator: session?.name || "Customer",
       timestamp: new Date().toISOString(),
     }, db.inventory_log);
-    // Fire alerts
+
     if (newQty === 0) {
       if (!local?.muted) broadcast({ type: "INVENTORY_DEPLETED", payload: { product_id: product.id, sku_code: product.sku, remaining_qty: 0 } });
     } else if (newQty <= product.safety_low_threshold) {
@@ -490,6 +534,31 @@ router.delete("/orders/:id", async (req, res) => {
 });
 
 // ─── Deleted Bills ────────────────────────────────────────────────────────────
+router.post("/deleted-bills", async (req: any, res) => {
+  if (!db.deleted_bills) db.deleted_bills = [];
+  const session = req.session;
+  const { items, grand_total, discount_applied, tax_collected, extraneous_charges, other_charges_desc, payment_mode, created_by } = req.body;
+  const row = {
+    id: `INV-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`,
+    order_source: "Direct POS",
+    order_status: "Void",
+    payment_mode: payment_mode || null,
+    items: items || [],
+    grand_total: grand_total || 0,
+    discount_applied: discount_applied || 0,
+    tax_collected: tax_collected || 0,
+    extraneous_charges: extraneous_charges || 0,
+    other_charges_desc: other_charges_desc || null,
+    created_by: created_by || null,
+    timestamp: new Date().toISOString(),
+    deleted_by: session?.name || created_by || "Unknown",
+    deleted_by_id: session?.employeeId || null,
+    deleted_at: new Date().toISOString(),
+  };
+  const saved = await dbInsert("deleted_bills", row, db.deleted_bills);
+  res.json(saved);
+});
+
 router.get("/deleted-bills", async (req: any, res) => {
   if (!db.deleted_bills) db.deleted_bills = [];
   const all = await dbSelect("deleted_bills", db.deleted_bills);
