@@ -83,11 +83,25 @@ function RoleHomeRedirect() {
   return <Navigate to={first ? first[1] : "/admin/pos"} replace />;
 }
 
-// §2.6.1 Granular route guard — blocks hidden routes, alerts admin via API
 function PermissionGuard({ module, children }: { module: string; children: React.ReactElement }) {
   const location = useLocation();
   const role = localStorage.getItem("adminRole");
   if (role === "Admin") return children;
+
+  // These routes are admin-only — always redirect employees
+  if (module === "__admin_only__") {
+    const permissions = JSON.parse(localStorage.getItem("accessPermissions") || "{}") as Record<string, Record<string, string>>;
+    const rolePerms: Record<string, string> = permissions[role || ""] || {};
+    const moduleRouteMap: [string, string][] = [
+      ["POS Billing", "/admin/pos"],
+      ["Orders", "/admin/orders"],
+      ["Inventory", "/admin/inventory"],
+      ["Financial Reports", "/admin/dealer"],
+      ["Settings", "/admin/settings"],
+    ];
+    const first = moduleRouteMap.find(([mod]) => (rolePerms[mod] ?? "Hidden") !== "Hidden");
+    return <Navigate to={first ? first[1] : "/admin/pos"} replace />;
+  }
 
   const permissions = JSON.parse(localStorage.getItem("accessPermissions") || "{}") as Record<string, Record<string, string>>;
   const rolePerms: Record<string, string> = permissions[role || ""] || {};
@@ -99,13 +113,12 @@ function PermissionGuard({ module, children }: { module: string; children: React
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: location.pathname, role }),
     }).catch(() => {});
-    // Redirect to first accessible page instead of always dashboard
     const moduleRouteMap: [string, string][] = [
-      ["POS Billing",       "/admin/pos"],
-      ["Orders",            "/admin/orders"],
-      ["Inventory",         "/admin/inventory"],
+      ["POS Billing", "/admin/pos"],
+      ["Orders", "/admin/orders"],
+      ["Inventory", "/admin/inventory"],
       ["Financial Reports", "/admin/dealer"],
-      ["Settings",          "/admin/settings"],
+      ["Settings", "/admin/settings"],
     ];
     const first = moduleRouteMap.find(([mod]) => (rolePerms[mod] ?? "Hidden") !== "Hidden");
     return <Navigate to={first ? first[1] : "/admin/pos"} replace />;
@@ -121,7 +134,7 @@ export default function App() {
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin" element={<RequireAuth><AdminLayout /></RequireAuth>}>
           <Route index element={<RoleHomeRedirect />} />
-          <Route path="dashboard" element={<ErrorBoundary><AdminDashboard /></ErrorBoundary>} />
+          <Route path="dashboard" element={<PermissionGuard module="__admin_only__"><ErrorBoundary><AdminDashboard /></ErrorBoundary></PermissionGuard>} />
           <Route path="pos" element={<PermissionGuard module="POS Billing"><ErrorBoundary><POS /></ErrorBoundary></PermissionGuard>} />
           <Route path="inventory" element={<PermissionGuard module="Inventory"><ErrorBoundary><Inventory /></ErrorBoundary></PermissionGuard>} />
           <Route path="orders" element={<PermissionGuard module="Orders"><ErrorBoundary><AdminOrders /></ErrorBoundary></PermissionGuard>} />
@@ -129,10 +142,10 @@ export default function App() {
           <Route path="employee" element={<PermissionGuard module="Employees"><ErrorBoundary><AdminEmployee /></ErrorBoundary></PermissionGuard>} />
           <Route path="report" element={<PermissionGuard module="Financial Reports"><ErrorBoundary><AdminReport /></ErrorBoundary></PermissionGuard>} />
           <Route path="dealer" element={<PermissionGuard module="Financial Reports"><ErrorBoundary><DealerExpenses /></ErrorBoundary></PermissionGuard>} />
-          <Route path="reviews" element={<ErrorBoundary><AdminReviews /></ErrorBoundary>} />
-          <Route path="gallery" element={<ErrorBoundary><AdminGallery /></ErrorBoundary>} />
+          <Route path="reviews" element={<PermissionGuard module="__admin_only__"><ErrorBoundary><AdminReviews /></ErrorBoundary></PermissionGuard>} />
+          <Route path="gallery" element={<PermissionGuard module="__admin_only__"><ErrorBoundary><AdminGallery /></ErrorBoundary></PermissionGuard>} />
           <Route path="settings" element={<PermissionGuard module="Settings"><ErrorBoundary><AdminSettings /></ErrorBoundary></PermissionGuard>} />
-          <Route path="profile" element={<ErrorBoundary><AdminProfile /></ErrorBoundary>} />
+          <Route path="profile" element={<PermissionGuard module="__admin_only__"><ErrorBoundary><AdminProfile /></ErrorBoundary></PermissionGuard>} />
         </Route>
 
         {/* Mobile Portal Routes */}
