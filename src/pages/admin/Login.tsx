@@ -1,9 +1,19 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { User, Lock, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 export default function AdminLogin() {
   const [role, setRole] = useState<"Admin" | "Employee">("Admin");
+
+  // Block back navigation to authenticated pages
+  useEffect(() => {
+    // Push multiple login entries so back button stays on login
+    window.history.pushState(null, "", "/admin/login");
+    window.history.pushState(null, "", "/admin/login");
+    const block = () => window.history.pushState(null, "", "/admin/login");
+    window.addEventListener("popstate", block);
+    return () => window.removeEventListener("popstate", block);
+  }, []);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");

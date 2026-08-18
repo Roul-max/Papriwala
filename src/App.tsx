@@ -48,7 +48,9 @@ const ROUTE_MODULE_MAP: Record<string, string> = {
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const role = localStorage.getItem("adminRole");
-  return role ? children : <Navigate to="/admin/login" replace />;
+  const token = localStorage.getItem("sessionToken");
+  if (!role || !token) return <Navigate to="/admin/login" replace />;
+  return children;
 }
 
 function RequireMobileAuth({ children }: { children: React.ReactElement }) {
