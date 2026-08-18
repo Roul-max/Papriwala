@@ -7,12 +7,19 @@ export default function AdminLogin() {
 
   // Block back navigation to authenticated pages
   useEffect(() => {
-    // Push multiple login entries so back button stays on login
     window.history.pushState(null, "", "/admin/login");
     window.history.pushState(null, "", "/admin/login");
     const block = () => window.history.pushState(null, "", "/admin/login");
     window.addEventListener("popstate", block);
-    return () => window.removeEventListener("popstate", block);
+    // If browser restores this page from bfcache, re-block
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) window.history.pushState(null, "", "/admin/login");
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener("popstate", block);
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, []);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");

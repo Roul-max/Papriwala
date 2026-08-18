@@ -91,6 +91,19 @@ export default function AdminLayout() {
     }
   };
 
+  // If browser restores this page from bfcache after logout, force reload to login
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        const role = localStorage.getItem("adminRole");
+        const token = localStorage.getItem("sessionToken");
+        if (!role || !token) window.location.replace("/admin/login");
+      }
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
   useEffect(() => { fetchAvatar(); }, []);
 
   // ── Load notifications on mount ──────────────────────────────────────────
