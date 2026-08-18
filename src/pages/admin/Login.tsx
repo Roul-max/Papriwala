@@ -58,7 +58,7 @@ export default function AdminLogin() {
       if (data.permissions) localStorage.setItem("accessPermissions", JSON.stringify({ [data.role]: data.permissions }));
 
       if (data.role === "Admin") {
-        navigate("/admin/dashboard");
+        navigate("/admin/dashboard", { replace: true });
       } else {
         const perms: Record<string, string> = data.permissions || {};
         const moduleRouteMap: [string, string][] = [
@@ -70,7 +70,7 @@ export default function AdminLogin() {
           ["Settings",          "/admin/settings"],
         ];
         const first = moduleRouteMap.find(([mod]) => (perms[mod] ?? "Hidden") !== "Hidden");
-        navigate(first ? first[1] : "/admin/dashboard");
+        navigate(first ? first[1] : "/admin/dashboard", { replace: true });
       }
     } catch {
       setError("Server error. Please try again.");

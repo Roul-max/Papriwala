@@ -245,10 +245,12 @@ export default function AdminLayout() {
   const handleLogout = () => {
     const token = localStorage.getItem("sessionToken") || "";
     if (token) apiFetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token } }).catch(() => {});
-    sessionStorage.clear();
-    // Clear after replace so React doesn't re-render with missing auth
-    window.location.replace("/admin/login");
     ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
+    sessionStorage.clear();
+    // Replace entire history stack so back button can't return to authenticated pages
+    window.history.pushState(null, "", "/admin/login");
+    window.history.pushState(null, "", "/admin/login");
+    window.location.replace("/admin/login");
   };
 
   const handleClearNotifs = () => {
