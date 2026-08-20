@@ -7,7 +7,7 @@ export default function AdminDashboard() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [recentReviews, setRecentReviews] = useState<any[]>([]);
-  const [totalUnitsSold, setTotalUnitsSold] = useState(0);
+  const [todayItemSaleCount, setTodayItemSaleCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -26,13 +26,13 @@ export default function AdminDashboard() {
       setRecentOrders(o.slice(0, 5));
       const istOffset = 5.5 * 60 * 60 * 1000;
       const today = new Date(Date.now() + istOffset).toISOString().split("T")[0];
-      const units = o
+      const todaySoldItems = o
         .filter((ord: any) => {
           if (ord.order_status !== "Paid" || !ord.timestamp) return false;
           return new Date(new Date(ord.timestamp).getTime() + istOffset).toISOString().startsWith(today);
         })
         .reduce((sum: number, ord: any) => sum + (ord.items?.reduce((s: number, it: any) => s + (it.qty || 1), 0) || 0), 0);
-      setTotalUnitsSold(units);
+      setTodayItemSaleCount(todaySoldItems);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -44,9 +44,11 @@ export default function AdminDashboard() {
     fetchReviews();
     const interval = setInterval(() => fetchData(true), 15000);
     window.addEventListener("new-review", fetchReviews);
+    window.addEventListener("stock-updated", () => fetchData(true));
     return () => {
       clearInterval(interval);
       window.removeEventListener("new-review", fetchReviews);
+      window.removeEventListener("stock-updated", () => fetchData(true));
     };
   }, [fetchData, fetchReviews]);
 
@@ -54,7 +56,7 @@ export default function AdminDashboard() {
     ? [
         { title: "Today's Sales",     value: `₹${Number(analytics.totalRevenue || 0).toFixed(0)}`, icon: IndianRupee,   color: "text-green-600 bg-green-50" },
         { title: "Today's Orders",    value: analytics.totalOrders,                                 icon: ClipboardList, color: "text-blue-600 bg-blue-50" },
-        { title: "Total Product Sale",value: totalUnitsSold,                                        icon: BarChart3,     color: "text-maroon bg-cream" },
+        { title: "Today's Item Sale", value: todayItemSaleCount,                                    icon: BarChart3,     color: "text-maroon bg-cream" },
         { title: "Low Stock Items",   value: analytics.lowStock,                                    icon: AlertTriangle, color: "text-amber-600 bg-amber-50" },
         { title: "Out of Stock Items",value: analytics.outOfStock,                                  icon: XOctagon,      color: "text-red-600 bg-red-50" },
       ]
@@ -149,6 +151,7 @@ export default function AdminDashboard() {
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
               <p className="text-red-800 font-bold text-sm">🚫 Out of Stock</p>
               <p className="text-red-700 text-xs mt-1">{analytics.outOfStock} product(s) are out of stock.</p>
+              <Link to="/admin/inventory" className="text-xs text-red-800 font-bold underline mt-2 inline-block">View Inventory →</Link>
             </div>
           )}
         </div>

@@ -3,8 +3,11 @@ import { Router } from "express";
 import { db, supabase, dbSelect, dbInsert, dbUpdate, dbDelete } from "./db.js";
 import { broadcast } from "./ws.js";
 import bcrypt from "bcryptjs";
+import { createHmac } from "crypto";
 
 const router = Router();
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || "";
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || "";
 
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}/;
 
@@ -351,9 +354,10 @@ router.post("/products/:id/stock", async (req, res) => {
     timestamp: new Date().toISOString(),
   }, db.inventory_log);
 
+  broadcast({ type: "STOCK_UPDATED", payload: { product_id: product.id } });
   if (newQty === 0) {
     const prod = db.products.find((p: any) => p.id === product.id);
-    if (!prod?.muted) broadcast({ type: "INVENTORY_DEPLETED", payload: { product_id: product.id, sku_code: product.sku, remaining_qty: 0 } });
+    if (!prod?.muted) broadcast({ type: "INVENTORY_DEPLETED", payload: { product_id: product.id, product_name: product.name, sku_code: product.sku, remaining_qty: 0 } });
   } else if (newQty > 0 && newQty <= product.safety_low_threshold) {
     const prod = db.products.find((p: any) => p.id === product.id);
     if (!prod?.muted) broadcast({ type: "LOW_STOCK_ALERT", payload: { product_id: product.id, product_name: product.name, sku_code: product.sku, remaining_qty: newQty } });
@@ -367,6 +371,127 @@ router.get("/inventory-log", async (_req, res) => {
   res.json(await dbSelect("inventory_log", db.inventory_log));
 });
 
+function hasRazorpayConfig(): boolean {
+  return Boolean(RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET);
+}
+
+function findOrderProduct(products: any[], item: any) {
+  return products.find((p: any) =>
+    (item.product_id && p.id === item.product_id) ||
+    p.name?.toLowerCase() === item.name?.toLowerCase()
+  );
+}
+
+async function validateOrderStock(items: any[], isVoid: boolean): Promise<{ products: any[]; insufficientItems: string[] }> {
+  const products = await dbSelect("products", db.products);
+  const insufficientItems: string[] = [];
+
+  for (const item of (isVoid ? [] : items || [])) {
+    const qty = Number(item.qty);
+    if (!qty || qty <= 0) continue;
+    const product = findOrderProduct(products, item);
+    if (!product) continue;
+    if (product.current_stock_qty < qty) {
+      insufficientItems.push(`${product.name} (available: ${product.current_stock_qty}, requested: ${qty})`);
+    }
+  }
+
+  return { products, insufficientItems };
+}
+
+async function persistOrder(reqBody: any, session?: any) {
+  const isVoid = reqBody.order_status === "Void";
+  const { products, insufficientItems } = await validateOrderStock(reqBody.items || [], isVoid);
+
+  if (insufficientItems.length > 0) {
+    const error: any = new Error("Insufficient stock");
+    error.status = 400;
+    error.items = insufficientItems;
+    throw error;
+  }
+
+  const ts = Date.now();
+  const paymentMethod = reqBody.payment_method || reqBody.payment_mode || null;
+  const paymentMode = reqBody.payment_mode || reqBody.payment_method || null;
+  const newOrder = {
+    id: `INV-${new Date().getFullYear()}-${ts.toString().slice(-6)}`,
+    order_source: reqBody.order_source || null,
+    order_status: reqBody.order_status || "Paid",
+    payment_mode: paymentMode,
+    payment_method: paymentMethod,
+    items: reqBody.items || [],
+    grand_total: reqBody.grand_total || 0,
+    discount_applied: reqBody.discount_applied || 0,
+    tax_collected: reqBody.tax_collected || 0,
+    extraneous_charges: reqBody.extraneous_charges || 0,
+    other_charges_desc: reqBody.other_charges_desc || null,
+    created_by: reqBody.created_by || null,
+    customer_id: reqBody.customer_id || null,
+    customer_phone: reqBody.customer_phone || null,
+    table_id: reqBody.table_id || null,
+    payment_reference: reqBody.payment_reference || null,
+    gateway_order_id: reqBody.gateway_order_id || null,
+    gateway_signature: reqBody.gateway_signature || null,
+    timestamp: new Date().toISOString(),
+  };
+  const saved = await dbInsert("orders", newOrder, db.orders);
+
+  for (const item of (isVoid ? [] : (saved.items || []))) {
+    const qty = Number(item.qty);
+    if (!qty || qty <= 0) continue;
+
+    const product = findOrderProduct(products, item);
+    if (!product) continue;
+
+    let newQty: number;
+
+    if (supabase) {
+      const { data, error } = await supabase.rpc("decrement_stock", {
+        p_id: product.id,
+        p_qty: qty,
+      });
+      if (error) {
+        const fresh = await supabase.from("products").select("current_stock_qty").eq("id", product.id).single();
+        const currentQty = Number(fresh.data?.current_stock_qty ?? product.current_stock_qty);
+        newQty = Math.max(0, currentQty - qty);
+        await supabase.from("products").update({ current_stock_qty: newQty }).eq("id", product.id);
+      } else {
+        newQty = Number(data) ?? Math.max(0, product.current_stock_qty - qty);
+      }
+    } else {
+      newQty = Math.max(0, Number(product.current_stock_qty) - qty);
+      await dbUpdate("products", product.id, { current_stock_qty: newQty });
+    }
+
+    const local = db.products.find((p: any) => p.id === product.id);
+    if (local) local.current_stock_qty = newQty;
+
+    await dbInsert("inventory_log", {
+      id: crypto.randomUUID(),
+      type: "STOCK_OUT",
+      product_id: product.id,
+      product_name: product.name,
+      qty,
+      reason: `Order ${saved.id}`,
+      operator: session?.name || "Customer",
+      timestamp: new Date().toISOString(),
+    }, db.inventory_log);
+
+    broadcast({ type: "STOCK_UPDATED", payload: { product_id: product.id } });
+    if (newQty === 0) {
+      if (!local?.muted) broadcast({ type: "INVENTORY_DEPLETED", payload: { product_id: product.id, product_name: product.name, sku_code: product.sku, remaining_qty: 0 } });
+    } else if (newQty <= product.safety_low_threshold) {
+      if (!local?.muted) broadcast({ type: "LOW_STOCK_ALERT", payload: { product_id: product.id, product_name: product.name, sku_code: product.sku, remaining_qty: newQty } });
+    }
+  }
+
+  if (saved.order_source !== "Direct POS") {
+    broadcast({ type: "INBOUND_QR_ORDER", payload: { order_id: saved.id, table_number: saved.table_id || "Delivery", bill_amount: saved.grand_total } });
+  }
+
+  return saved;
+}
+
 // ─── Orders ──────────────────────────────────────────────────────────────────
 router.get("/orders", async (req, res) => {
   const all = await dbSelect("orders", db.orders);
@@ -377,6 +502,15 @@ router.get("/orders", async (req, res) => {
 
 router.post("/orders", async (req, res) => {
   const session = (req as any).session;
+  try {
+    const saved = await persistOrder(req.body, session);
+    return res.json(saved);
+  } catch (error: any) {
+    return res.status(error.status || 500).json({
+      error: error.message || "Failed to place order.",
+      ...(error.items ? { items: error.items } : {}),
+    });
+  }
 
   // ── Fetch fresh products from Supabase (source of truth) ─────────────────
   const products = await dbSelect("products", db.products);
@@ -468,8 +602,9 @@ router.post("/orders", async (req, res) => {
       timestamp: new Date().toISOString(),
     }, db.inventory_log);
 
+    broadcast({ type: "STOCK_UPDATED", payload: { product_id: product.id } });
     if (newQty === 0) {
-      if (!local?.muted) broadcast({ type: "INVENTORY_DEPLETED", payload: { product_id: product.id, sku_code: product.sku, remaining_qty: 0 } });
+      if (!local?.muted) broadcast({ type: "INVENTORY_DEPLETED", payload: { product_id: product.id, product_name: product.name, sku_code: product.sku, remaining_qty: 0 } });
     } else if (newQty <= product.safety_low_threshold) {
       if (!local?.muted) broadcast({ type: "LOW_STOCK_ALERT", payload: { product_id: product.id, product_name: product.name, sku_code: product.sku, remaining_qty: newQty } });
     }
@@ -479,6 +614,113 @@ router.post("/orders", async (req, res) => {
     broadcast({ type: "INBOUND_QR_ORDER", payload: { order_id: saved.id, table_number: saved.table_id || "Delivery", bill_amount: saved.grand_total } });
   }
   res.json(saved);
+});
+
+router.post("/payments/razorpay/order", async (req, res) => {
+  if (!hasRazorpayConfig()) {
+    return res.status(500).json({ error: "Razorpay is not configured on the server." });
+  }
+
+  const draftOrder = req.body || {};
+  const grandTotal = Number(draftOrder.grand_total || 0);
+  if (!grandTotal || grandTotal <= 0) {
+    return res.status(400).json({ error: "A valid order total is required." });
+  }
+
+  const isVoid = draftOrder.order_status === "Void";
+  const { insufficientItems } = await validateOrderStock(draftOrder.items || [], isVoid);
+  if (insufficientItems.length > 0) {
+    return res.status(400).json({ error: "Insufficient stock", items: insufficientItems });
+  }
+
+  const receipt = `qr_${Date.now()}`;
+  const amount = Math.round(grandTotal * 100);
+  const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString("base64");
+
+  try {
+    const response = await fetch("https://api.razorpay.com/v1/orders", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount,
+        currency: "INR",
+        receipt,
+        payment_capture: 1,
+        notes: {
+          table_id: draftOrder.table_id || "Counter",
+          customer_id: draftOrder.customer_id || "",
+          order_source: draftOrder.order_source || "QR Table Menu",
+        },
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(502).json({ error: data.error?.description || "Failed to create Razorpay order." });
+    }
+
+    res.json({
+      keyId: RAZORPAY_KEY_ID,
+      razorpayOrderId: data.id,
+      amount: data.amount,
+      currency: data.currency,
+      name: "Shri Badrinarayan Papriwale",
+      description: "Mobile Menu Order",
+    });
+  } catch {
+    res.status(502).json({ error: "Unable to reach Razorpay right now. Please try again." });
+  }
+});
+
+router.post("/payments/razorpay/verify", async (req, res) => {
+  if (!hasRazorpayConfig()) {
+    return res.status(500).json({ error: "Razorpay is not configured on the server." });
+  }
+
+  const session = (req as any).session;
+  const {
+    razorpay_order_id,
+    razorpay_payment_id,
+    razorpay_signature,
+    orderData,
+  } = req.body || {};
+
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !orderData) {
+    return res.status(400).json({ error: "Missing Razorpay verification details." });
+  }
+
+  const expectedSignature = createHmac("sha256", RAZORPAY_KEY_SECRET)
+    .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+    .digest("hex");
+
+  if (expectedSignature !== razorpay_signature) {
+    return res.status(400).json({ error: "Razorpay signature verification failed." });
+  }
+
+  const allOrders = await dbSelect("orders", db.orders);
+  const existingOrder = allOrders.find((o: any) => o.payment_reference === razorpay_payment_id);
+  if (existingOrder) return res.json(existingOrder);
+
+  try {
+    const saved = await persistOrder({
+      ...orderData,
+      order_status: "Paid",
+      payment_method: "razorpay",
+      payment_mode: "Razorpay",
+      payment_reference: razorpay_payment_id,
+      gateway_order_id: razorpay_order_id,
+      gateway_signature: razorpay_signature,
+    }, session);
+    res.json(saved);
+  } catch (error: any) {
+    res.status(error.status || 500).json({
+      error: error.message || "Failed to finalize Razorpay order.",
+      ...(error.items ? { items: error.items } : {}),
+    });
+  }
 });
 
 router.patch("/orders/:id", async (req, res) => {

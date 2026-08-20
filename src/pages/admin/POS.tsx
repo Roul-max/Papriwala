@@ -77,6 +77,16 @@ export default function POS() {
     apiFetch("/api/product-variants").then(res => res.json()).then(data => setAllVariants(Array.isArray(data) ? data : []));
     fetchDeletedOrders();
     generateInvoiceNo();
+
+    const onStockUpdated = () => {
+      apiFetch("/api/products").then(res => res.json()).then(data => {
+        const list = Array.isArray(data) ? data : [];
+        setProducts(list);
+      });
+      refreshAnalytics();
+    };
+    window.addEventListener("stock-updated", onStockUpdated);
+    return () => window.removeEventListener("stock-updated", onStockUpdated);
   }, []);
 
   useEffect(() => {
@@ -84,7 +94,7 @@ export default function POS() {
     if (categoryFilter !== "All") result = result.filter(p => p.category === categoryFilter);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      result = result.filter(p => p.name?.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q) || p.id?.toLowerCase().includes(q));
+      result = result.filter(p => p.name?.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q));
     }
     setFilteredProducts(result);
   }, [categoryFilter, searchQuery, products]);
@@ -457,12 +467,9 @@ export default function POS() {
   };
 
   const ribbonCards = [
-    { label: "Today's Sales",    val: `₹${Number(analytics.totalRevenue || 0).toFixed(0)}` },
-    { label: "Today's Orders",   val: String(analytics.totalOrders) },
-    { label: "Total Products",   val: String(analytics.totalProducts) },
-    { label: "Total Product Sale",val: String(totalUnitsSold) },
-    { label: "Low Stock",        val: String(analytics.lowStock),   alert: analytics.lowStock > 0 },
-    { label: "Out of Stock",     val: String(analytics.outOfStock), alert: analytics.outOfStock > 0 },
+    { label: "Total Products", val: String(analytics.totalProducts) },
+    { label: "Low Stock",      val: String(analytics.lowStock), alert: analytics.lowStock > 0 },
+    { label: "Out of Stock",   val: String(analytics.outOfStock), alert: analytics.outOfStock > 0 },
   ];
 
   return (

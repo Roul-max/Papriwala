@@ -39,7 +39,11 @@ export default function Inventory() {
     apiFetch("/api/categories").then(r => r.json()).then(d => setCategories(Array.isArray(d) ? d.map((c: any) => c.name) : []));
   };
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll();
+    const onStockUpdated = () => fetchAll();
+    window.addEventListener("stock-updated", onStockUpdated);
+    return () => window.removeEventListener("stock-updated", onStockUpdated);
+  }, []);
 
   const categoryFilterOptions = ["All", ...categories];
 

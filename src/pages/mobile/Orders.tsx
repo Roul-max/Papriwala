@@ -7,6 +7,14 @@ export default function Orders() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const getPaymentLabel = (order: any) => {
+    const method = String(order.payment_method || order.payment_mode || "").toLowerCase();
+    if (method === "upi") return "UPI / QR";
+    if (method === "razorpay") return "Razorpay";
+    if (method === "card") return "Card";
+    if (method === "cash") return "Cash";
+    return order.payment_mode || order.payment_method || "Payment";
+  };
 
   const fetchOrders = () => {
     const customerId = localStorage.getItem("customerId");
@@ -64,7 +72,7 @@ export default function Orders() {
               </div>
               <div className="flex justify-between items-center pt-2 border-t border-gray-100">
                 <span className="text-xs text-gray-500 capitalize">
-                  {order.payment_method === "upi" ? "UPI / QR" : order.payment_method === "card" ? "Card" : "Cash"}
+                  {getPaymentLabel(order)}
                   {order.table_id ? ` • Table ${order.table_id}` : ""}
                 </span>
                 <span className="font-bold text-maroon">₹{Number(order.grand_total).toFixed(2)}</span>

@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { apiFetch } from "../lib/apiFetch";
+import { usePrinter } from "../hooks/usePrinter";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,28 @@ interface SearchResults {
   products: any[];
   dealers: any[];
   employees: any[];
+}
+
+interface PrintableOrderItem {
+  name: string;
+  size?: string;
+  unit?: string;
+  qty: number;
+  price: number;
+}
+
+interface PrintableOrder {
+  id: string;
+  timestamp?: string;
+  table_id?: string;
+  created_by?: string;
+  payment_method?: string;
+  payment_mode?: string;
+  items?: PrintableOrderItem[];
+  grand_total?: number;
+  discount_applied?: number;
+  tax_collected?: number;
+  extraneous_charges?: number;
 }
 
 // ─── Nav items (static, defined outside component) ───────────────────────────
@@ -70,6 +93,7 @@ export default function AdminLayout() {
   const notifRef  = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
   const audioRef  = useRef<HTMLAudioElement | null>(null);
+  const { printReceipt } = usePrinter();
 
   // ── Load avatar from server (never from localStorage) ──────────────────
   const fetchAvatar = () => {
@@ -178,7 +202,7 @@ export default function AdminLayout() {
           }
           if (type === "INVENTORY_DEPLETED") {
             setInventoryDepleted(true);
-            addNotif(`🚫 Out of Stock: SKU ${payload.sku_code}`, `Product ${payload.product_id} has reached zero stock.`, "error");
+            addNotif(`🚫 Out of Stock: ${payload.product_name}`, `${payload.product_name} has reached zero stock.`, "error");
           }
           if (type === "LOW_STOCK_ALERT") {
             addNotif(`⚠️ Low Stock: ${payload.product_name}`, `Only ${payload.remaining_qty} units left.`, "warning");
@@ -194,6 +218,9 @@ export default function AdminLayout() {
           }
           if (type === "NEW_REVIEW") {
             window.dispatchEvent(new Event("new-review"));
+          }
+          if (type === "STOCK_UPDATED") {
+            window.dispatchEvent(new Event("stock-updated"));
           }
         } catch {}
       };
@@ -260,9 +287,6 @@ export default function AdminLayout() {
     if (token) apiFetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token } }).catch(() => {});
     ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
     sessionStorage.clear();
-    // Replace entire history stack so back button can't return to authenticated pages
-    window.history.pushState(null, "", "/admin/login");
-    window.history.pushState(null, "", "/admin/login");
     window.location.replace("/admin/login");
   };
 
@@ -273,11 +297,7 @@ export default function AdminLayout() {
     setQrOrderMap({});
   };
 
-  const printQrOrder = useCallback(async (orderId: string) => {
-    const res = await apiFetch(`/api/orders`);
-    const all = await res.json();
-    const order = (Array.isArray(all) ? all : []).find((o: any) => o.id === orderId);
-    if (!order) return;
+  const printQrOrderFallback = useCallback((order: PrintableOrder) => {
     const w = window.open("", "", "width=400,height=600");
     if (!w) return;
     w.document.write(`<html><head><title>Order ${order.id}</title><style>
@@ -298,6 +318,32 @@ export default function AdminLayout() {
     w.document.close();
     setTimeout(() => { w.print(); w.close(); }, 300);
   }, []);
+
+  const printQrOrder = useCallback(async (orderId: string) => {
+    const res = await apiFetch("/api/orders");
+    const all = await res.json();
+    const order = (Array.isArray(all) ? all : []).find((o: PrintableOrder) => o.id === orderId);
+    if (!order) return;
+
+    const items = Array.isArray(order.items) ? order.items : [];
+    const subtotal = items.reduce((sum, item) => {
+      return sum + ((Number(item.price) || 0) * (Number(item.qty) || 0));
+    }, 0);
+
+    const result = await printReceipt({
+      invoiceNo: order.id,
+      cashier: order.created_by || "Customer",
+      paymentMode: order.payment_method || order.payment_mode || "—",
+      items,
+      subtotal,
+      discountTotal: Number(order.discount_applied || 0),
+      taxes: Number(order.tax_collected || 0),
+      grandTotal: Number(order.grand_total || 0),
+      otherCharges: Number(order.extraneous_charges || 0),
+    });
+
+    if (result.fallback) printQrOrderFallback(order);
+  }, [printQrOrderFallback, printReceipt]);
 
   if (isMobile) return (
     <div className="flex items-center justify-center h-screen bg-gray-100 p-6">

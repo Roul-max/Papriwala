@@ -7,11 +7,9 @@ export default function AdminLogin() {
 
   // Block back navigation to authenticated pages
   useEffect(() => {
-    window.history.pushState(null, "", "/admin/login");
-    window.history.pushState(null, "", "/admin/login");
     const block = () => window.history.pushState(null, "", "/admin/login");
+    block();
     window.addEventListener("popstate", block);
-    // If browser restores this page from bfcache, re-block
     const onPageShow = (e: PageTransitionEvent) => {
       if (e.persisted) window.history.pushState(null, "", "/admin/login");
     };
@@ -74,9 +72,8 @@ export default function AdminLogin() {
       if (data.avatar)      localStorage.setItem("adminAvatar", data.avatar);
       if (data.permissions) localStorage.setItem("accessPermissions", JSON.stringify({ [data.role]: data.permissions }));
 
-      if (data.role === "Admin") {
-        navigate("/admin/dashboard", { replace: true });
-      } else {
+      // Clear all history entries so back button can't return to previous session's pages
+      const dest = data.role === "Admin" ? "/admin/dashboard" : (() => {
         const perms: Record<string, string> = data.permissions || {};
         const moduleRouteMap: [string, string][] = [
           ["POS Billing",       "/admin/pos"],
@@ -87,8 +84,9 @@ export default function AdminLogin() {
           ["Settings",          "/admin/settings"],
         ];
         const first = moduleRouteMap.find(([mod]) => (perms[mod] ?? "Hidden") !== "Hidden");
-        navigate(first ? first[1] : "/admin/dashboard", { replace: true });
-      }
+        return first ? first[1] : "/admin/pos";
+      })();
+      window.location.replace(dest);
     } catch {
       setError("Server error. Please try again.");
     } finally {
