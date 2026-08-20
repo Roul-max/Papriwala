@@ -14,3 +14,9 @@ CREATE TABLE IF NOT EXISTS public.banners (
 ALTER TABLE public.raw_material_purchases
   ADD COLUMN IF NOT EXISTS amount_paid numeric DEFAULT 0,
   ADD COLUMN IF NOT EXISTS payment_method text;
+
+-- 3. Add Razorpay tracking columns to orders
+ALTER TABLE public.orders
+  ADD COLUMN IF NOT EXISTS payment_reference text,
+  ADD COLUMN IF NOT EXISTS gateway_order_id text,
+  ADD COLUMN IF NOT EXISTS gateway_signature text;
