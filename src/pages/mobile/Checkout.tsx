@@ -54,6 +54,7 @@ export default function Checkout() {
     payment_method: method,
     payment_mode: "Razorpay",
     customer_id: localStorage.getItem("customerId") || null,
+    customer_phone: localStorage.getItem("customerPhone") || localStorage.getItem("employeePhone") || null,
     items: items.map(i => ({
       name: i.name,
       size: i.size,

@@ -25,9 +25,11 @@ export default function SplashLogin() {
       });
       const data = await res.json();
       if (!res.ok || !data.success) { setError("Something went wrong. Please try again."); return; }
+      ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
       localStorage.setItem("customerRole", "Customer");
       localStorage.setItem("customerName", data.name || "Customer");
       localStorage.setItem("customerToken", data.sessionToken || "");
+      localStorage.setItem("customerPhone", phone);
       localStorage.setItem("employeePhone", phone);
       localStorage.setItem("customerId", data.customer_id);
       localStorage.setItem("isNewCustomer", data.is_new ? "true" : "false");

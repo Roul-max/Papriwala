@@ -8,14 +8,20 @@
  *                      server-side (never trusted from client alone)
  */
 export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Promise<Response> {
-  // Use admin session if present, otherwise fall back to customer session
-  const isAdmin = !!localStorage.getItem("adminRole") && localStorage.getItem("adminRole") !== "Customer";
-  const role  = isAdmin
+  const path = typeof input === "string" ? input : input.toString();
+  const isAdminRoute = typeof window !== "undefined" && window.location.pathname.startsWith("/admin");
+  const hasCustomerSession = !!localStorage.getItem("customerToken");
+  const hasAdminSession = !!localStorage.getItem("adminRole") && localStorage.getItem("adminRole") !== "Customer" && !!localStorage.getItem("sessionToken");
+
+  // Prefer the customer session on mobile/customer pages so a stale admin login
+  // cannot hijack the request and trigger a 403 on customer-only screens.
+  const useAdminSession = isAdminRoute && hasAdminSession && !path.startsWith("/api/auth/logout");
+  const role = useAdminSession
     ? localStorage.getItem("adminRole") || ""
-    : localStorage.getItem("customerRole") || "Customer";
-  const token = isAdmin
+    : (hasCustomerSession ? localStorage.getItem("customerRole") || "Customer" : "");
+  const token = useAdminSession
     ? localStorage.getItem("sessionToken") || ""
-    : localStorage.getItem("customerToken") || "";
+    : (hasCustomerSession ? localStorage.getItem("customerToken") || "" : "");
 
   const headers = new Headers(init.headers ?? {});
   if (role)  headers.set("X-User-Role",     role);
@@ -30,11 +36,11 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
 
   // Session invalidated — redirect to appropriate login
   if (response.status === 401) {
-    if (isAdmin) {
+    if (isAdminRoute) {
       ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
       window.location.replace("/admin/login");
     } else {
-      ["customerRole","customerName","customerToken","customerId","customerAvatar","employeePhone","isNewCustomer"].forEach(k => localStorage.removeItem(k));
+      ["customerRole","customerName","customerToken","customerId","customerPhone","customerAvatar","employeePhone","isNewCustomer"].forEach(k => localStorage.removeItem(k));
       window.location.replace("/login");
     }
   }

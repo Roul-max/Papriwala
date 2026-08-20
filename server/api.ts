@@ -496,8 +496,14 @@ async function persistOrder(reqBody: any, session?: any) {
 router.get("/orders", async (req, res) => {
   const all = await dbSelect("orders", db.orders);
   const sorted = all.sort((a: any, b: any) => new Date(b.timestamp ?? 0).getTime() - new Date(a.timestamp ?? 0).getTime());
-  const { customer_id } = req.query;
-  res.json(customer_id ? sorted.filter((o: any) => o.customer_id === customer_id) : sorted);
+  const customer_id = String(req.query.customer_id || "");
+  const customer_phone = String(req.query.customer_phone || "");
+  const filtered = sorted.filter((o: any) => {
+    if (customer_id && o.customer_id === customer_id) return true;
+    if (customer_phone && o.customer_phone === customer_phone) return true;
+    return false;
+  });
+  res.json(customer_id || customer_phone ? filtered : sorted);
 });
 
 router.post("/orders", async (req, res) => {

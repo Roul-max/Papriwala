@@ -129,7 +129,7 @@ export default function Profile() {
     if (isCustomer || localStorage.getItem("guestBrowse") === "true") {
       const token = localStorage.getItem("customerToken") || "";
       if (token) fetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token, "X-User-Role": "Customer" } }).catch(() => {});
-      ["customerRole","customerName","customerToken","customerId","customerAvatar","employeePhone","isNewCustomer","orderHistory","guestBrowse"].forEach(k => localStorage.removeItem(k));
+      ["customerRole","customerName","customerToken","customerId","customerPhone","customerAvatar","employeePhone","isNewCustomer","orderHistory","guestBrowse"].forEach(k => localStorage.removeItem(k));
       sessionStorage.clear();
       window.dispatchEvent(new Event("customerProfileUpdated"));
       navigate("/login");

@@ -18,9 +18,13 @@ export default function Orders() {
 
   const fetchOrders = () => {
     const customerId = localStorage.getItem("customerId");
-    if (!customerId) { setOrders([]); setLoading(false); return; }
+    const customerPhone = localStorage.getItem("customerPhone") || localStorage.getItem("employeePhone");
+    if (!customerId && !customerPhone) { setOrders([]); setLoading(false); return; }
     setLoading(true);
-    apiFetch(`/api/orders?customer_id=${encodeURIComponent(customerId)}`)
+    const params = new URLSearchParams();
+    if (customerId) params.set("customer_id", customerId);
+    if (customerPhone) params.set("customer_phone", customerPhone);
+    apiFetch(`/api/orders?${params.toString()}`)
       .then(r => r.json())
       .then(d => setOrders(Array.isArray(d) ? d : []))
       .finally(() => setLoading(false));
