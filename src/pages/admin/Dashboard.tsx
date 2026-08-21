@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { IndianRupee, ClipboardList, BarChart3, AlertTriangle, XOctagon, Users, Package, TrendingUp, ArrowRight, RefreshCw, Star } from "lucide-react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../../lib/apiFetch";
+import { getCurrentBusinessDateString, toBusinessDateString } from "../../lib/businessTime";
 
 export default function AdminDashboard() {
   const [analytics, setAnalytics] = useState<any>(null);
@@ -24,12 +25,11 @@ export default function AdminDashboard() {
       ]);
       setAnalytics(a);
       setRecentOrders(o.slice(0, 5));
-      const istOffset = 5.5 * 60 * 60 * 1000;
-      const today = new Date(Date.now() + istOffset).toISOString().split("T")[0];
+      const today = getCurrentBusinessDateString();
       const todaySoldItems = o
         .filter((ord: any) => {
-          if (ord.order_status !== "Paid" || !ord.timestamp) return false;
-          return new Date(new Date(ord.timestamp).getTime() + istOffset).toISOString().startsWith(today);
+          if (ord.order_status !== "Paid" || (!ord.timestamp && !ord.created_at)) return false;
+          return toBusinessDateString(ord.timestamp || ord.created_at) === today;
         })
         .reduce((sum: number, ord: any) => sum + (ord.items?.reduce((s: number, it: any) => s + (it.qty || 1), 0) || 0), 0);
       setTodayItemSaleCount(todaySoldItems);

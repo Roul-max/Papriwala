@@ -3,6 +3,7 @@ import { Search, Plus, Trash2, Printer, ShoppingCart, X, FileDown, EyeOff } from
 import jsPDF from "jspdf";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
+import { getCurrentBusinessDateString, toBusinessDateString } from "../../lib/businessTime";
 import { usePrinter } from "../../hooks/usePrinter";
 
 export default function POS() {
@@ -50,8 +51,7 @@ export default function POS() {
   const { printReceipt, openCashDrawer } = usePrinter();
 
   const refreshAnalytics = () => {
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const today = new Date(Date.now() + istOffset).toISOString().split("T")[0];
+    const today = getCurrentBusinessDateString();
     Promise.all([
       apiFetch("/api/analytics").then(res => res.json()),
       apiFetch("/api/orders").then(res => res.json()),
@@ -59,8 +59,8 @@ export default function POS() {
       setAnalytics(a || analytics);
       const units = (Array.isArray(orders) ? orders : [])
         .filter((o: any) => {
-          if (o.order_status !== "Paid" || !o.timestamp) return false;
-          return new Date(new Date(o.timestamp).getTime() + istOffset).toISOString().startsWith(today);
+          if (o.order_status !== "Paid" || (!o.timestamp && !o.created_at)) return false;
+          return toBusinessDateString(o.timestamp || o.created_at) === today;
         })
         .reduce((sum: number, o: any) => sum + (o.items?.reduce((s: number, it: any) => s + (it.qty || 1), 0) || 0), 0);
       setTotalUnitsSold(units);

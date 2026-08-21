@@ -3,6 +3,7 @@ import { Download, FileText, Calendar, Loader2, EyeOff } from "lucide-react";
 import jsPDF from "jspdf";
 import { apiFetch } from "../../lib/apiFetch";
 import { useAccess } from "../../hooks/useAccess";
+import { getCurrentBusinessDateString, getCurrentBusinessMonthString, isWithinBusinessDateRange, toBusinessDateString, toBusinessMonthString } from "../../lib/businessTime";
 
 export default function AdminReport() {
   const [rangeStart, setRangeStart] = useState("");
@@ -24,14 +25,14 @@ export default function AdminReport() {
   const exportDailyCSV = async () => {
     setGenerating("csv");
     const { orders, expenses } = await fetchAll();
-    const today = new Date().toISOString().split("T")[0];
-    const todayOrders = orders.filter((o: any) => o.timestamp?.startsWith(today));
-    const todayExpenses = expenses.filter((e: any) => e.expense_date?.startsWith(today));
+    const today = getCurrentBusinessDateString();
+    const filteredTodayOrders = orders.filter((o: any) => isWithinBusinessDateRange(o.timestamp || o.created_at, today, today));
+    const todayExpenses = expenses.filter((e: any) => isWithinBusinessDateRange(e.expense_date, today, today));
 
     const rows = [
       ["Type", "ID", "Amount", "Status/Category", "Time"],
-      ...todayOrders.map((o: any) => ["Order", o.id, o.grand_total, o.order_status, o.timestamp]),
-      ...todayExpenses.map((e: any) => ["Expense", e.id, e.amount, e.expense_type, e.expense_date]),
+      ...filteredTodayOrders.map((o: any) => ["Order", o.id, o.grand_total, o.order_status, toBusinessDateString(o.timestamp || o.created_at)]),
+      ...todayExpenses.map((e: any) => ["Expense", e.id, e.amount, e.expense_type, toBusinessDateString(e.expense_date)]),
     ];
     const csv = rows.map(r => r.map(String).map(v => `"${v}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -49,12 +50,12 @@ export default function AdminReport() {
     const { orders, expenses, products } = await fetchAll();
     const now = new Date();
     const month = now.toLocaleString("default", { month: "long", year: "numeric" });
-    const monthPrefix = now.toISOString().slice(0, 7);
+    const monthPrefix = getCurrentBusinessMonthString();
 
-    const monthOrders = orders.filter((o: any) => o.timestamp?.startsWith(monthPrefix));
+    const monthOrders = orders.filter((o: any) => toBusinessMonthString(o.timestamp || o.created_at) === monthPrefix);
     const paidOrders = monthOrders.filter((o: any) => o.order_status === "Paid");
     const totalRevenue = paidOrders.reduce((s: number, o: any) => s + Number(o.grand_total), 0);
-    const monthExpenses = expenses.filter((e: any) => e.expense_date?.startsWith(monthPrefix));
+    const monthExpenses = expenses.filter((e: any) => toBusinessMonthString(e.expense_date) === monthPrefix);
     const totalExpenses = monthExpenses.reduce((s: number, e: any) => s + Number(e.amount), 0);
     const netIncome = totalRevenue - totalExpenses;
     const lowStock = products.filter((p: any) => p.current_stock_qty > 0 && p.current_stock_qty <= p.safety_low_threshold).length;
@@ -110,11 +111,10 @@ export default function AdminReport() {
     setGenerating("range");
     const { orders, expenses } = await fetchAll();
 
-    const inRange = (ts: string) => ts && ts >= rangeStart && ts <= rangeEnd + "T23:59:59";
-    const rangeOrders = orders.filter((o: any) => inRange(o.timestamp));
+    const rangeOrders = orders.filter((o: any) => isWithinBusinessDateRange(o.timestamp || o.created_at, rangeStart, rangeEnd));
     const paidOrders = rangeOrders.filter((o: any) => o.order_status === "Paid");
     const totalRevenue = paidOrders.reduce((s: number, o: any) => s + Number(o.grand_total), 0);
-    const rangeExpenses = expenses.filter((e: any) => inRange(e.expense_date));
+    const rangeExpenses = expenses.filter((e: any) => isWithinBusinessDateRange(e.expense_date, rangeStart, rangeEnd));
     const totalExpenses = rangeExpenses.reduce((s: number, e: any) => s + Number(e.amount), 0);
 
     const doc = new jsPDF();

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { ChevronDown, ChevronUp, Check, Clock, MessageCircle, EyeOff, Filter, Printer, Trash2, X } from "lucide-react";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
+import { getCurrentBusinessMonthString, isWithinBusinessDateRange, toBusinessDateString, toBusinessMonthString } from "../../lib/businessTime";
 import { usePrinter } from "../../hooks/usePrinter";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -31,7 +32,6 @@ interface Order {
 
 type Tab = "orders" | "deleted";
 type FilterMode = "all" | "month" | "custom";
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -40,18 +40,6 @@ function relativeTime(ts: string): string {
   if (diff < 60)   return `${diff}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   return `${Math.floor(diff / 3600)}h ago`;
-}
-
-function getIstDateString(ts: string): string {
-  return new Date(new Date(ts).getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
-}
-
-function getIstMonthString(ts: string): string {
-  return getIstDateString(ts).slice(0, 7);
-}
-
-function getCurrentIstMonthString(): string {
-  return new Date(Date.now() + IST_OFFSET_MS).toISOString().slice(0, 7);
 }
 
 function paymentLabel(order: Order): string {
@@ -128,7 +116,7 @@ export default function AdminOrders() {
   const [expanded,    setExpanded]    = useState<string | null>(null);
   const [analytics,   setAnalytics]   = useState({ totalRevenue: 0, totalOrders: 0 });
   const [filterMode,  setFilterMode]  = useState<FilterMode>("all");
-  const [filterMonth, setFilterMonth] = useState(getCurrentIstMonthString());
+  const [filterMonth, setFilterMonth] = useState(getCurrentBusinessMonthString());
   const [filterFrom,  setFilterFrom]  = useState("");
   const [filterTo,    setFilterTo]    = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -188,11 +176,11 @@ export default function AdminOrders() {
   const filteredOrders = orders
     .filter(o => {
       if (o.order_status === "In-Preparation") return false;
-      if (!o.timestamp) return filterMode === "all";
-      if (filterMode === "month")  return getIstMonthString(o.timestamp) === filterMonth;
+      const orderDate = toBusinessDateString(o.timestamp || (o as any).created_at);
+      if (!orderDate) return filterMode === "all";
+      if (filterMode === "month")  return toBusinessMonthString(o.timestamp || (o as any).created_at) === filterMonth;
       if (filterMode === "custom" && filterFrom && filterTo) {
-        const d = getIstDateString(o.timestamp);
-        return d >= filterFrom && d <= filterTo;
+        return isWithinBusinessDateRange(o.timestamp || (o as any).created_at, filterFrom, filterTo);
       }
       return true;
     })

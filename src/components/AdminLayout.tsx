@@ -300,6 +300,12 @@ export default function AdminLayout() {
   const printQrOrderFallback = useCallback((order: PrintableOrder) => {
     const w = window.open("", "", "width=400,height=600");
     if (!w) return;
+    const items = Array.isArray(order.items) ? order.items : [];
+    const subtotal = items.reduce((sum, item) => sum + ((Number(item.price) || 0) * (Number(item.qty) || 0)), 0);
+    const discount = Number(order.discount_applied || 0);
+    const taxes = Number(order.tax_collected || 0);
+    const otherCharges = Number(order.extraneous_charges || 0);
+    const grandTotal = Number(order.grand_total || 0);
     w.document.write(`<html><head><title>Order ${order.id}</title><style>
       body{font-family:monospace;padding:16px;font-size:13px}
       h2{text-align:center;margin:0 0 4px}p{margin:2px 0;text-align:center}
@@ -309,10 +315,14 @@ export default function AdminLayout() {
     </style></head><body>
       <h2>SHRI BADRINARAYAN</h2><p>Papriwale</p><hr/>
       <p>Order: <b>${order.id}</b></p>
-      <p>Table: ${order.table_id || "Delivery"} | ${new Date(order.timestamp).toLocaleString()}</p><hr/>
-      <table>${(order.items || []).map((i: any) => `<tr><td>${i.name}</td><td>x${i.qty}</td><td class="right">₹${(i.price * i.qty).toFixed(2)}</td></tr>`).join("")}</table><hr/>
-      <p class="bold">Total: ₹${order.grand_total}</p>
-      <p>Payment: ${order.payment_method || "—"}</p><hr/>
+      <p>Table: ${order.table_id || "Delivery"} | ${order.timestamp ? new Date(order.timestamp).toLocaleString() : "—"}</p><hr/>
+      <table>${items.map((i: any) => `<tr><td>${i.name}${i.size ? ` (${i.size})` : ""}</td><td>x${i.qty}</td><td class="right">₹${(Number(i.price) * Number(i.qty)).toFixed(2)}</td></tr>`).join("")}</table><hr/>
+      <p class="bold">Subtotal: ₹${subtotal.toFixed(2)}</p>
+      ${discount > 0 ? `<p>Discount: -₹${discount.toFixed(2)}</p>` : ""}
+      ${otherCharges > 0 ? `<p>Other Charges: ₹${otherCharges.toFixed(2)}</p>` : ""}
+      <p>Tax (GST): ₹${taxes.toFixed(2)}</p><hr/>
+      <p class="bold">Grand Total: ₹${grandTotal.toFixed(2)}</p>
+      <p>Payment: ${order.payment_method || order.payment_mode || "—"}</p><hr/>
       <p>Thank you!</p>
     </body></html>`);
     w.document.close();
