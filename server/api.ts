@@ -375,6 +375,24 @@ function hasRazorpayConfig(): boolean {
   return Boolean(RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET);
 }
 
+async function readRazorpayError(response: Response): Promise<{ message: string; raw: string; data: any }> {
+  const raw = await response.text();
+  try {
+    const data = raw ? JSON.parse(raw) : null;
+    return {
+      message: data?.error?.description || data?.error?.message || data?.message || `Razorpay request failed with status ${response.status}`,
+      raw,
+      data,
+    };
+  } catch {
+    return {
+      message: raw || `Razorpay request failed with status ${response.status}`,
+      raw,
+      data: null,
+    };
+  }
+}
+
 function findOrderProduct(products: any[], item: any) {
   return products.find((p: any) =>
     (item.product_id && p.id === item.product_id) ||
@@ -663,9 +681,14 @@ router.post("/payments/razorpay/order", async (req, res) => {
       }),
     });
 
-    const data = await response.json();
+    const data = response.ok ? await response.json() : await readRazorpayError(response);
     if (!response.ok) {
-      return res.status(502).json({ error: data.error?.description || "Failed to create Razorpay order." });
+      console.error("Razorpay order creation failed", {
+        status: response.status,
+        message: data.message,
+        raw: data.raw,
+      });
+      return res.status(502).json({ error: data.message || "Failed to create Razorpay order." });
     }
 
     res.json({
@@ -677,6 +700,7 @@ router.post("/payments/razorpay/order", async (req, res) => {
       description: "Mobile Menu Order",
     });
   } catch {
+    console.error("Razorpay order creation threw unexpectedly");
     res.status(502).json({ error: "Unable to reach Razorpay right now. Please try again." });
   }
 });
@@ -722,6 +746,11 @@ router.post("/payments/razorpay/verify", async (req, res) => {
     }, session);
     res.json(saved);
   } catch (error: any) {
+    console.error("Razorpay verification failed", {
+      message: error?.message,
+      status: error?.status,
+      items: error?.items,
+    });
     res.status(error.status || 500).json({
       error: error.message || "Failed to finalize Razorpay order.",
       ...(error.items ? { items: error.items } : {}),
