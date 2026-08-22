@@ -17,6 +17,15 @@ function getNextSalaryDate(joiningDate: string, salaryType: string): string {
   return "Daily";
 }
 
+function deriveEmployeePassword(emp: any): string {
+  const rawName = String(emp?.full_name || emp?.name || "").trim();
+  const firstName = rawName.split(/\s+/)[0] || "Emp";
+  const loginId = String(emp?.login_id || "").trim();
+  const suffix = loginId.match(/(\d+)$/)?.[1] || emp?.id?.match(/(\d+)$/)?.[1] || "";
+  if (!suffix) return "—";
+  return `${firstName}@${suffix}`;
+}
+
 export default function AdminEmployee() {
   const [tab, setTab] = useState("directory");
   const [employees, setEmployees] = useState<any[]>([]);
@@ -198,7 +207,7 @@ export default function AdminEmployee() {
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs">{showPhoneMap[emp.id] ? (emp.login_password || "—") : "••••••••••"}</span>
+                          <span className="font-mono text-xs">{showPhoneMap[emp.id] ? deriveEmployeePassword(emp) : "••••••••••"}</span>
                           <button onClick={() => togglePhone(emp.id)} className="text-gray-400 hover:text-maroon">
                             {showPhoneMap[emp.id] ? <EyeOff size={13} /> : <Eye size={13} />}
                           </button>
