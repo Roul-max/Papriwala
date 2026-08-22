@@ -1,4 +1,4 @@
-import { roleAuthMiddleware, createSession, destroySession, checkRateLimit, resetRateLimit, getSession } from "./middleware.js";
+import { roleAuthMiddleware, createSession, destroySession, checkRateLimit, resetRateLimit, getSession, buildSessionCookie, clearSessionCookie, extractSessionToken } from "./middleware.js";
 import { Router } from "express";
 import { db, supabase, dbSelect, dbInsert, dbUpdate, dbDelete } from "./db.js";
 import { broadcast } from "./ws.js";
@@ -9,16 +9,24 @@ const router = Router();
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || "";
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || "";
 
+if (process.env.NODE_ENV === "production") {
+  const missing = ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"].filter((key) => !process.env[key]);
+  if (missing.length > 0) {
+    throw new Error(`Missing required production environment variables: ${missing.join(", ")}`);
+  }
+}
+
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}/;
 
-const otpStore = new Map<string, { otp: string; expires: number; employeeId: string }>();
-
-// ── Input sanitization helper ─────────────────────────────────────────────────────
+// Input sanitization helper
 function sanitize(val: any): string {
   if (typeof val !== "string") return "";
-  // Don't truncate base64 image data URLs
   if (val.startsWith("data:")) return val;
   return val.replace(/[<>"'`;]/g, "").trim().slice(0, 500);
+}
+
+function isBcryptHash(value: unknown): value is string {
+  return typeof value === "string" && /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(value);
 }
 
 type VariantPayload = {
@@ -56,6 +64,23 @@ function normalizeVariantPayload(variants: any[], basePrice: number): VariantPay
     .filter((variant) => variant.size_label && Number.isFinite(variant.variant_price_modifier) && variant.variant_price_modifier > 0);
 }
 
+async function getCustomerProfile(customerId: string) {
+  if (!customerId) return null;
+  if (supabase) {
+    try {
+      const { data } = await supabase.from("guest_customers").select("*").eq("id", customerId).maybeSingle();
+      if (data) return data;
+    } catch {}
+  }
+  return (db.guest_customers || []).find((customer: any) => customer.id === customerId) || null;
+}
+
+async function getEmployeeProfile(employeeId: string) {
+  if (!employeeId) return null;
+  const employees = await dbSelect("employees", db.employees);
+  return employees.find((employee: any) => employee.id === employeeId) || null;
+}
+
 async function syncProductVariants(productId: string, variants: any[] | undefined, basePrice: number): Promise<void> {
   const normalized = normalizeVariantPayload(variants || [], basePrice);
 
@@ -91,127 +116,8 @@ async function syncProductVariants(productId: string, variants: any[] | undefine
   }
 }
 
-// ─── Auth (public, no middleware) ────────────────────────────────────────────
-
-router.post("/auth/login", async (req, res) => {
-  const ip =
-    (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() ||
-    req.socket.remoteAddress ||
-    "unknown";
-
-  const { allowed } = checkRateLimit(ip);
-  if (!allowed)
-    return res.status(429).json({ error: "Too many failed attempts. Please try again later." });
-
-  const { username, password, role } = req.body;
-  const u = (username ?? "").trim();
-  const p = (password ?? "").trim();
-
-  if (role === "Admin" && u === "admin") {
-    if (!db.adminPasswordHash)
-      return res.status(401).json({ error: "Admin password not set. Please set it first." });
-
-    const isMatch = await bcrypt.compare(p, db.adminPasswordHash);
-    if (isMatch) {
-      resetRateLimit(ip);
-      const token = await createSession("Admin", "Super Admin");
-      return res.json({ success: true, role: "Admin", name: db.settings?.adminName || "Super Admin", sessionToken: token, avatar: db.settings?.adminAvatar || null });
-    }
-  }
-
-  if (role === "Employee") {
-    const employees = await dbSelect("employees", db.employees);
-    const emp = employees.find(
-      (e: any) => e.login_id?.toLowerCase() === u.toLowerCase() && e.login_password === p
-    );
-    if (emp) {
-      resetRateLimit(ip);
-      const token = await createSession(emp.designation_tag, emp.name, emp.id);
-      if (!db.employee_sessions) db.employee_sessions = [];
-      const sess = {
-        id: crypto.randomUUID(),
-        employee_id: emp.id,
-        login_time: new Date().toISOString(),
-        logout_time: null,
-        session_token: token,
-      };
-      await dbInsert("employee_sessions", sess, db.employee_sessions);
-      return res.json({
-        success: true,
-        role: emp.designation_tag,
-        name: emp.name,
-        employee_id: emp.id,
-        avatar: emp.avatar || null,
-        permissions: db.settings?.permissions?.[emp.designation_tag] || {},
-        sessionToken: token,
-      });
-    }
-  }
-
-  res.status(401).json({ error: "Invalid credentials" });
-});
-
-router.post("/auth/set-password", async (req, res) => {
-  if (db.adminPasswordHash)
-    return res.status(403).json({ error: "Password already set. Use change-password instead." });
-
-  const { new_pass } = req.body;
-  if (!new_pass || !PASSWORD_REGEX.test(new_pass))
-    return res.status(400).json({ error: "Password must be 8+ chars with upper, lower, number and special character." });
-
-  db.adminPasswordHash = await bcrypt.hash(new_pass, 12);
-  if (supabase)
-    await supabase.from("settings").upsert({ id: 1, value: { ...db.settings, adminPasswordHash: db.adminPasswordHash } });
-
-  res.json({ success: true });
-});
-
-router.post("/auth/send-otp", async (req, res) => {
-  const phone = (req.body.phone ?? "").trim();
-  if (!phone) return res.status(400).json({ error: "Phone number required" });
-
-  const employees = await dbSelect("employees", db.employees);
-  const emp = employees.find((e: any) => e.phone_number === phone);
-  if (!emp) return res.status(404).json({ error: "No employee found with this phone number" });
-
-  const otp = String(Math.floor(100000 + Math.random() * 900000));
-  otpStore.set(phone, { otp, expires: Date.now() + 5 * 60 * 1000, employeeId: emp.id });
-  // TODO: Integrate a real SMS provider (e.g. Twilio, MSG91) to send OTP
-  // For now OTP is logged server-side only — never expose it in the API response
-  console.log(`[OTP] Phone: ${phone} | OTP: ${otp} | Employee: ${emp.name}`);
-  res.json({ success: true, message: "OTP sent to registered number" });
-});
-
-router.post("/auth/verify-otp", async (req, res) => {
-  const phone = (req.body.phone ?? "").trim();
-  const otp   = (req.body.otp   ?? "").trim();
-  const entry = otpStore.get(phone);
-
-  if (!entry) return res.status(400).json({ error: "No OTP requested for this number" });
-  if (Date.now() > entry.expires) {
-    otpStore.delete(phone);
-    return res.status(400).json({ error: "OTP expired. Please request a new one." });
-  }
-  if (entry.otp !== otp) return res.status(401).json({ error: "Invalid OTP" });
-
-  otpStore.delete(phone);
-  const employees = await dbSelect("employees", db.employees);
-  const emp = employees.find((e: any) => e.id === entry.employeeId);
-  if (!emp) return res.status(404).json({ error: "Employee not found" });
-
-  const token = await createSession(emp.designation_tag, emp.name, emp.id);
-  res.json({
-    success: true,
-    role: emp.designation_tag,
-    name: emp.name,
-    employee_id: emp.id,
-    permissions: db.settings?.permissions?.[emp.designation_tag] || {},
-    sessionToken: token,
-  });
-});
-
 // Guest login — mobile customers enter phone only, auto-registered as new customer
-router.post("/auth/guest-login", async (req, res) => {
+router.post("/auth/guest-login", roleAuthMiddleware, async (req, res) => {
   const phone = (req.body.phone ?? "").trim();
   if (!phone || !/^\d{10}$/.test(phone)) return res.status(400).json({ error: "Valid 10-digit phone required" });
 
@@ -230,7 +136,6 @@ router.post("/auth/guest-login", async (req, res) => {
       customer = data;
       const idx = db.guest_customers.findIndex((c: any) => c.id === data.id);
       if (idx >= 0) db.guest_customers[idx] = data; else db.guest_customers.push(data);
-      console.log(`[guest-login] Returning customer: ${data.name} | avatar: ${data.avatar ? 'yes' : 'no'}`);
     } else {
       // New customer — insert into Supabase
       isNew = true;
@@ -247,7 +152,6 @@ router.post("/auth/guest-login", async (req, res) => {
       }
       const idx = db.guest_customers.findIndex((c: any) => c.id === customer.id);
       if (idx >= 0) db.guest_customers[idx] = customer; else db.guest_customers.push(customer);
-      console.log(`[guest-login] New customer created: ${customer.id}`);
     }
   } else {
     // No Supabase — use in-memory
@@ -260,12 +164,22 @@ router.post("/auth/guest-login", async (req, res) => {
   }
 
   const token = await createSession("Customer", customer.name, customer.id);
-  res.json({ success: true, customer_id: customer.id, name: customer.name, avatar: customer.avatar || null, phone, is_new: isNew, sessionToken: token });
+  res.setHeader("Set-Cookie", buildSessionCookie(token));
+  res.json({ success: true, customer_id: customer.id, name: customer.name, avatar: customer.avatar || null, phone, is_new: isNew });
 });
 
 // Update guest customer name and/or avatar — persists across logins
-router.patch("/auth/guest-profile", async (req, res) => {
+router.patch("/auth/guest-profile", roleAuthMiddleware, async (req, res) => {
+  const token = extractSessionToken(req);
+  const session = token ? await getSession(token) : null;
   const { customer_id, name, avatar } = req.body;
+
+  if (!session || session.role !== "Customer" || !session.employeeId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  if (!customer_id || customer_id !== session.employeeId) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
   if (!customer_id) return res.status(400).json({ error: "customer_id required" });
   if (!db.guest_customers) db.guest_customers = [];
 
@@ -285,7 +199,6 @@ router.patch("/auth/guest-profile", async (req, res) => {
       console.error("[guest-profile] Supabase update failed:", error.message);
       return res.status(500).json({ error: error.message });
     }
-    console.log(`[guest-profile] Saved for ${customer_id}: name=${patch.name ?? '-'} avatar=${patch.avatar ? 'yes' : '-'}`);
   }
   res.json({ success: true });
 });
@@ -296,8 +209,8 @@ router.post("/auth/forbidden-alert", (req, res) => {
   res.json({ ok: true });
 });
 
-router.post("/auth/logout", async (req, res) => {
-  const token = req.header("X-Session-Token") || "";
+router.post("/auth/logout", roleAuthMiddleware, async (req, res) => {
+  const token = extractSessionToken(req);
   if (token) {
     await destroySession(token);
     const logoutTime = new Date().toISOString();
@@ -315,20 +228,56 @@ router.post("/auth/logout", async (req, res) => {
       if (s) s.logout_time = logoutTime;
     }
   }
+  res.setHeader("Set-Cookie", clearSessionCookie());
   res.json({ success: true });
 });
 
 // ─── Self-profile endpoint (any authenticated employee) ─────────────────────
-router.get("/auth/me", async (req: any, res) => {
-  const token = req.header("X-Session-Token") || "";
+router.get("/auth/me", roleAuthMiddleware, async (req: any, res) => {
+  const token = extractSessionToken(req);
   if (!token) return res.status(401).json({ error: "No token" });
   const session = await getSession(token);
   if (!session) return res.status(401).json({ error: "Invalid session" });
-  if (!session.employeeId) return res.json({ name: session.name, avatar: null });
-  const employees = await dbSelect("employees", db.employees);
-  const emp = employees.find((e: any) => e.id === session.employeeId);
-  if (!emp) return res.status(404).json({ error: "Not found" });
-  res.json({ name: emp.name || emp.full_name || "", avatar: emp.avatar || null });
+  if (session.role === "Customer") {
+    const customer = await getCustomerProfile(session.employeeId || "");
+    if (!customer) {
+      return res.status(404).json({ error: "Customer session no longer exists" });
+    }
+    return res.json({
+      role: "Customer",
+      name: customer.name || "Customer",
+      avatar: customer.avatar || null,
+      customer_id: customer.id,
+      phone: customer.phone || "",
+    });
+  }
+
+  if (session.role === "Admin") {
+    return res.json({
+      role: "Admin",
+      name: db.settings?.adminName || session.name || "Super Admin",
+      avatar: db.settings?.adminAvatar || null,
+    });
+  }
+
+  const emp = await getEmployeeProfile(session.employeeId || "");
+  if (!emp) {
+    return res.json({
+      role: session.role,
+      name: session.name || "",
+      avatar: null,
+      employee_id: session.employeeId || "",
+      permissions: db.settings?.permissions?.[session.role] || {},
+    });
+  }
+
+  res.json({
+    role: session.role,
+    name: emp.name || emp.full_name || session.name || "",
+    avatar: emp.avatar || null,
+    employee_id: emp.id,
+    permissions: db.settings?.permissions?.[session.role] || {},
+  });
 });
 
 // ─── Apply auth middleware ────────────────────────────────────────────────────
@@ -336,6 +285,127 @@ router.use(roleAuthMiddleware);
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 router.get("/health", (_req, res) => res.json({ status: "ok", supabase: !!supabase }));
+
+router.post("/client-error", (req, res) => {
+  const payload = req.body || {};
+  const message = sanitize(payload.message || "Unknown client error");
+  const route = sanitize(payload.route || "");
+  const userAgent = sanitize(payload.userAgent || "");
+  const stack = sanitize(payload.stack || "");
+  const componentStack = sanitize(payload.componentStack || "");
+  const timestamp = sanitize(payload.timestamp || new Date().toISOString());
+
+  console.error("[client-error]", {
+    message,
+    route,
+    userAgent,
+    timestamp,
+    stack: stack.slice(0, 2000),
+    componentStack: componentStack.slice(0, 2000),
+  });
+
+  res.json({ ok: true });
+});
+
+// ─── Admin / Employee Auth ──────────────────────────────────────────────────
+router.post("/auth/login", roleAuthMiddleware, async (req, res) => {
+  const ip =
+    (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() ||
+    req.socket.remoteAddress ||
+    "unknown";
+
+  const { allowed } = checkRateLimit(ip);
+  if (!allowed) {
+    return res.status(429).json({ error: "Too many failed attempts. Please try again later." });
+  }
+
+  const { username, password, role } = req.body;
+  const u = (username ?? "").trim();
+  const p = (password ?? "").trim();
+
+  if (role === "Admin" && u === "admin") {
+    if (!db.adminPasswordHash) {
+      return res.status(401).json({ error: "Admin password not set. Please set it first." });
+    }
+
+    const isMatch = await bcrypt.compare(p, db.adminPasswordHash);
+    if (isMatch) {
+      resetRateLimit(ip);
+      const token = await createSession("Admin", "Super Admin");
+      res.setHeader("Set-Cookie", buildSessionCookie(token));
+      return res.json({
+        success: true,
+        role: "Admin",
+        name: db.settings?.adminName || "Super Admin",
+        avatar: db.settings?.adminAvatar || null,
+      });
+    }
+  }
+
+  if (role === "Employee") {
+    const employees = await dbSelect("employees", db.employees);
+    const emp = employees.find((e: any) => e.login_id?.toLowerCase() === u.toLowerCase());
+    const storedPassword = emp?.login_password ?? "";
+    const passwordMatches = emp
+      ? (isBcryptHash(storedPassword) ? await bcrypt.compare(p, storedPassword) : storedPassword === p)
+      : false;
+    if (emp && passwordMatches) {
+      if (!isBcryptHash(storedPassword)) {
+        const upgradedHash = await bcrypt.hash(p, 12);
+        const localEmp = db.employees.find((e: any) => e.id === emp.id);
+        if (localEmp) localEmp.login_password = upgradedHash;
+        if (supabase) {
+          await supabase.from("employees").update({ login_password: upgradedHash }).eq("id", emp.id);
+        }
+      }
+      resetRateLimit(ip);
+      const token = await createSession(emp.designation_tag, emp.name, emp.id);
+      if (!db.employee_sessions) db.employee_sessions = [];
+      const sess = {
+        id: crypto.randomUUID(),
+        employee_id: emp.id,
+        login_time: new Date().toISOString(),
+        logout_time: null,
+        session_token: token,
+      };
+      await dbInsert("employee_sessions", sess, db.employee_sessions);
+      res.setHeader("Set-Cookie", buildSessionCookie(token));
+      return res.json({
+        success: true,
+        role: emp.designation_tag,
+        name: emp.name,
+        employee_id: emp.id,
+        avatar: emp.avatar || null,
+        permissions: db.settings?.permissions?.[emp.designation_tag] || {},
+      });
+    }
+  }
+
+  res.status(401).json({ error: "Invalid credentials" });
+});
+
+router.post("/auth/set-password", roleAuthMiddleware, async (req, res) => {
+  if (db.adminPasswordHash) {
+    return res.status(403).json({ error: "Password already set. Use change-password instead." });
+  }
+
+  const { new_pass } = req.body;
+  if (!new_pass || !PASSWORD_REGEX.test(new_pass)) {
+    return res.status(400).json({
+      error: "Password must be 8+ chars with upper, lower, number and special character.",
+    });
+  }
+
+  db.adminPasswordHash = await bcrypt.hash(new_pass, 12);
+  if (supabase) {
+    await supabase.from("settings").upsert({
+      id: 1,
+      value: { ...db.settings, adminPasswordHash: db.adminPasswordHash },
+    });
+  }
+
+  res.json({ success: true });
+});
 
 // ─── Products ────────────────────────────────────────────────────────────────
 router.get("/products", async (_req, res) => {
@@ -452,7 +522,9 @@ router.get("/inventory-log", async (_req, res) => {
 });
 
 function hasRazorpayConfig(): boolean {
-  return Boolean(RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET);
+  if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) return false;
+  if (process.env.NODE_ENV === "production" && RAZORPAY_KEY_ID.startsWith("rzp_test_")) return false;
+  return true;
 }
 
 async function readRazorpayError(response: Response): Promise<{ message: string; raw: string; data: any }> {
@@ -497,6 +569,69 @@ async function validateOrderStock(items: any[], isVoid: boolean): Promise<{ prod
   return { products, insufficientItems };
 }
 
+function getVariantForItem(productVariants: any[], item: any) {
+  const target = String(item?.size || item?.size_label || "").trim().toLowerCase();
+  if (!target) return null;
+  return productVariants.find((variant: any) => String(variant.size_label || "").trim().toLowerCase() === target) || null;
+}
+
+function computeTrustedItemTotal(product: any, item: any, productVariants: any[] = []): number {
+  const qty = Number(item?.qty || 0);
+  if (!qty || qty <= 0) return 0;
+
+  const variant = getVariantForItem(productVariants, item);
+  const variantMultiplier = Number(variant?.variant_price_modifier || 1) || 1;
+  const basePrice = Number(product?.price || 0);
+  const unitPrice = basePrice * variantMultiplier;
+
+  // Prices are stored per unit in the catalog, including gm-based items.
+  return Number((unitPrice * qty).toFixed(2));
+}
+
+async function computeTrustedOrderTotal(items: any[]): Promise<{ total: number; products: any[]; productVariants: any[] }> {
+  const products = await dbSelect("products", db.products);
+  const productVariants = await dbSelect("product_variants", db.product_variants || []);
+  let total = 0;
+
+  for (const item of items || []) {
+    const product = findOrderProduct(products, item);
+    if (!product) continue;
+    const matchingVariants = productVariants.filter((v: any) => v.product_id === product.id);
+    total += computeTrustedItemTotal(product, item, matchingVariants);
+  }
+
+  return { total: Number(total.toFixed(2)), products, productVariants };
+}
+
+function clampMoney(value: any): number {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) return 0;
+  return Number(amount.toFixed(2));
+}
+
+async function computeTrustedOrderFinancials(reqBody: any): Promise<{
+  subtotal: number;
+  discountApplied: number;
+  taxCollected: number;
+  extraneousCharges: number;
+  grandTotal: number;
+}> {
+  const items = Array.isArray(reqBody?.items) ? reqBody.items : [];
+  const { total: subtotal } = await computeTrustedOrderTotal(items);
+  const discountApplied = Math.min(clampMoney(reqBody?.discount_applied), subtotal);
+  const extraneousCharges = clampMoney(reqBody?.extraneous_charges);
+  const grandTotal = Number(Math.max(0, subtotal - discountApplied + extraneousCharges).toFixed(2));
+  const taxCollected = clampMoney(reqBody?.tax_collected);
+
+  return {
+    subtotal,
+    discountApplied,
+    taxCollected,
+    extraneousCharges,
+    grandTotal,
+  };
+}
+
 async function persistOrder(reqBody: any, session?: any) {
   const isVoid = reqBody.order_status === "Void";
   const { products, insufficientItems } = await validateOrderStock(reqBody.items || [], isVoid);
@@ -511,6 +646,7 @@ async function persistOrder(reqBody: any, session?: any) {
   const ts = Date.now();
   const paymentMethod = reqBody.payment_method || reqBody.payment_mode || null;
   const paymentMode = reqBody.payment_mode || reqBody.payment_method || null;
+  const financials = await computeTrustedOrderFinancials(reqBody);
   const newOrder = {
     id: `INV-${new Date().getFullYear()}-${ts.toString().slice(-6)}`,
     order_source: reqBody.order_source || null,
@@ -518,10 +654,10 @@ async function persistOrder(reqBody: any, session?: any) {
     payment_mode: paymentMode,
     payment_method: paymentMethod,
     items: reqBody.items || [],
-    grand_total: reqBody.grand_total || 0,
-    discount_applied: reqBody.discount_applied || 0,
-    tax_collected: reqBody.tax_collected || 0,
-    extraneous_charges: reqBody.extraneous_charges || 0,
+    grand_total: financials.grandTotal,
+    discount_applied: financials.discountApplied,
+    tax_collected: financials.taxCollected,
+    extraneous_charges: financials.extraneousCharges,
     other_charges_desc: reqBody.other_charges_desc || null,
     created_by: reqBody.created_by || null,
     customer_id: reqBody.customer_id || null,
@@ -596,6 +732,18 @@ router.get("/orders", async (req, res) => {
   const sorted = all.sort((a: any, b: any) => new Date(b.timestamp ?? 0).getTime() - new Date(a.timestamp ?? 0).getTime());
   const customer_id = String(req.query.customer_id || "");
   const customer_phone = String(req.query.customer_phone || "");
+  const session = (req as any).session;
+
+  if (session?.role === "Customer") {
+    const ownCustomerId = String(session.employeeId || "");
+    const filtered = sorted.filter((o: any) => {
+      if (ownCustomerId && o.customer_id === ownCustomerId) return true;
+      if (customer_phone && o.customer_phone === customer_phone && (!customer_id || customer_id === ownCustomerId)) return true;
+      return false;
+    });
+    return res.json(filtered);
+  }
+
   const filtered = sorted.filter((o: any) => {
     if (customer_id && o.customer_id === customer_id) return true;
     if (customer_phone && o.customer_phone === customer_phone) return true;
@@ -615,109 +763,6 @@ router.post("/orders", async (req, res) => {
       ...(error.items ? { items: error.items } : {}),
     });
   }
-
-  // ── Fetch fresh products from Supabase (source of truth) ─────────────────
-  const products = await dbSelect("products", db.products);
-
-  // ── Skip stock deduction for Void orders (abandoned carts) ─────────────
-  const isVoid = req.body.order_status === "Void";
-
-  // ── Stock validation ──────────────────────────────────────────────────────
-  const insufficientItems: string[] = [];
-  for (const item of (isVoid ? [] : (req.body.items || []))) {
-    const qty = Number(item.qty);
-    if (!qty || qty <= 0) continue;
-    const product = products.find((p: any) =>
-      (item.product_id && p.id === item.product_id) ||
-      p.name?.toLowerCase() === item.name?.toLowerCase()
-    );
-    if (!product) continue;
-    if (product.current_stock_qty < qty)
-      insufficientItems.push(`${product.name} (available: ${product.current_stock_qty}, requested: ${qty})`);
-  }
-  if (insufficientItems.length > 0)
-    return res.status(400).json({ error: "Insufficient stock", items: insufficientItems });
-
-  const ts = Date.now();
-  const newOrder = {
-    id: `INV-${new Date().getFullYear()}-${ts.toString().slice(-6)}`,
-    order_source: req.body.order_source || null,
-    order_status: req.body.order_status || "Paid",
-    payment_mode: req.body.payment_mode || null,
-    items: req.body.items || [],
-    grand_total: req.body.grand_total || 0,
-    discount_applied: req.body.discount_applied || 0,
-    tax_collected: req.body.tax_collected || 0,
-    extraneous_charges: req.body.extraneous_charges || 0,
-    other_charges_desc: req.body.other_charges_desc || null,
-    created_by: req.body.created_by || null,
-    customer_id: req.body.customer_id || null,
-    customer_phone: req.body.customer_phone || null,
-    table_id: req.body.table_id || null,
-    timestamp: new Date().toISOString(),
-  };
-  const saved = await dbInsert("orders", newOrder, db.orders);
-
-  // ── Atomic stock deduction — skipped for Void (abandoned cart) orders ──────
-  for (const item of (isVoid ? [] : (saved.items || []))) {
-    const qty = Number(item.qty);
-    if (!qty || qty <= 0) continue;
-
-    const product = products.find((p: any) =>
-      (item.product_id && p.id === item.product_id) ||
-      p.name?.toLowerCase() === item.name?.toLowerCase()
-    );
-    if (!product) continue;
-
-    let newQty: number;
-
-    if (supabase) {
-      // Atomic decrement with floor at 0 — prevents negative stock and race conditions
-      const { data, error } = await supabase.rpc("decrement_stock", {
-        p_id: product.id,
-        p_qty: qty,
-      });
-      if (error) {
-        // rpc not available — fall back to safe update
-        const fresh = await supabase.from("products").select("current_stock_qty").eq("id", product.id).single();
-        const currentQty = Number(fresh.data?.current_stock_qty ?? product.current_stock_qty);
-        newQty = Math.max(0, currentQty - qty);
-        await supabase.from("products").update({ current_stock_qty: newQty }).eq("id", product.id);
-      } else {
-        newQty = Number(data) ?? Math.max(0, product.current_stock_qty - qty);
-      }
-    } else {
-      newQty = Math.max(0, Number(product.current_stock_qty) - qty);
-      await dbUpdate("products", product.id, { current_stock_qty: newQty });
-    }
-
-    // Sync in-memory
-    const local = db.products.find((p: any) => p.id === product.id);
-    if (local) local.current_stock_qty = newQty;
-
-    await dbInsert("inventory_log", {
-      id: crypto.randomUUID(),
-      type: "STOCK_OUT",
-      product_id: product.id,
-      product_name: product.name,
-      qty,
-      reason: `Order ${saved.id}`,
-      operator: session?.name || "Customer",
-      timestamp: new Date().toISOString(),
-    }, db.inventory_log);
-
-    broadcast({ type: "STOCK_UPDATED", payload: { product_id: product.id } });
-    if (newQty === 0) {
-      if (!local?.muted) broadcast({ type: "INVENTORY_DEPLETED", payload: { product_id: product.id, product_name: product.name, sku_code: product.sku, remaining_qty: 0 } });
-    } else if (newQty <= product.safety_low_threshold) {
-      if (!local?.muted) broadcast({ type: "LOW_STOCK_ALERT", payload: { product_id: product.id, product_name: product.name, sku_code: product.sku, remaining_qty: newQty } });
-    }
-  }
-
-  if (saved.order_source !== "Direct POS") {
-    broadcast({ type: "INBOUND_QR_ORDER", payload: { order_id: saved.id, table_number: saved.table_id || "Delivery", bill_amount: saved.grand_total } });
-  }
-  res.json(saved);
 });
 
 router.post("/payments/razorpay/order", async (req, res) => {
@@ -726,19 +771,24 @@ router.post("/payments/razorpay/order", async (req, res) => {
   }
 
   const draftOrder = req.body || {};
-  const grandTotal = Number(draftOrder.grand_total || 0);
-  if (!grandTotal || grandTotal <= 0) {
+  const items = Array.isArray(draftOrder.items) ? draftOrder.items : [];
+  if (items.length === 0) {
+    return res.status(400).json({ error: "At least one item is required." });
+  }
+
+  const financials = await computeTrustedOrderFinancials(draftOrder);
+  if (!financials.grandTotal || financials.grandTotal <= 0) {
     return res.status(400).json({ error: "A valid order total is required." });
   }
 
   const isVoid = draftOrder.order_status === "Void";
-  const { insufficientItems } = await validateOrderStock(draftOrder.items || [], isVoid);
+  const { insufficientItems } = await validateOrderStock(items, isVoid);
   if (insufficientItems.length > 0) {
     return res.status(400).json({ error: "Insufficient stock", items: insufficientItems });
   }
 
   const receipt = `qr_${Date.now()}`;
-  const amount = Math.round(grandTotal * 100);
+  const amount = Math.round(financials.grandTotal * 100);
   const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString("base64");
 
   try {
@@ -810,6 +860,11 @@ router.post("/payments/razorpay/verify", async (req, res) => {
     return res.status(400).json({ error: "Razorpay signature verification failed." });
   }
 
+  const items = Array.isArray(orderData?.items) ? orderData.items : [];
+  const financials = await computeTrustedOrderFinancials(orderData);
+  if (!items.length || !financials.grandTotal || financials.grandTotal <= 0) {
+    return res.status(400).json({ error: "Unable to calculate trusted order total." });
+  }
   const allOrders = await dbSelect("orders", db.orders);
   const existingOrder = allOrders.find((o: any) => o.payment_reference === razorpay_payment_id);
   if (existingOrder) return res.json(existingOrder);
@@ -817,6 +872,10 @@ router.post("/payments/razorpay/verify", async (req, res) => {
   try {
     const saved = await persistOrder({
       ...orderData,
+      grand_total: financials.grandTotal,
+      discount_applied: financials.discountApplied,
+      tax_collected: financials.taxCollected,
+      extraneous_charges: financials.extraneousCharges,
       order_status: "Paid",
       payment_method: "razorpay",
       payment_mode: "Razorpay",
@@ -880,9 +939,7 @@ router.delete("/orders/:id", async (req, res) => {
     deleted_by_id: session?.employeeId || null,
     deleted_at: new Date().toISOString(),
   };
-  console.log("[DELETE /orders] saving to deleted_bills:", JSON.stringify({ id: deletedRow.id, deleted_by: deletedRow.deleted_by, deleted_by_id: deletedRow.deleted_by_id }));
   const insertResult = await dbInsert("deleted_bills", deletedRow, db.deleted_bills);
-  console.log("[DELETE /orders] dbInsert result:", JSON.stringify(insertResult));
 
   await dbDelete("orders", req.params.id);
   const idx = db.orders.findIndex((o: any) => o.id === req.params.id);
@@ -894,17 +951,18 @@ router.delete("/orders/:id", async (req, res) => {
 router.post("/deleted-bills", async (req: any, res) => {
   if (!db.deleted_bills) db.deleted_bills = [];
   const session = req.session;
-  const { items, grand_total, discount_applied, tax_collected, extraneous_charges, other_charges_desc, payment_mode, created_by } = req.body;
+  const { items, other_charges_desc, payment_mode, created_by } = req.body;
+  const financials = await computeTrustedOrderFinancials(req.body);
   const row = {
     id: `INV-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`,
     order_source: "Direct POS",
     order_status: "Void",
     payment_mode: payment_mode || null,
     items: items || [],
-    grand_total: grand_total || 0,
-    discount_applied: discount_applied || 0,
-    tax_collected: tax_collected || 0,
-    extraneous_charges: extraneous_charges || 0,
+    grand_total: financials.grandTotal,
+    discount_applied: financials.discountApplied,
+    tax_collected: financials.taxCollected,
+    extraneous_charges: financials.extraneousCharges,
     other_charges_desc: other_charges_desc || null,
     created_by: created_by || null,
     timestamp: new Date().toISOString(),
@@ -1051,7 +1109,8 @@ router.post("/employees", async (req, res) => {
   const login_id = `EMP${empNumber}`;
   const rawName = (name || full_name || "").trim();
   const firstName = rawName.split(" ")[0] || "Emp";
-  const login_password = `${firstName}@${empNumber}`;
+  const generatedPassword = `${firstName}@${empNumber}`;
+  const login_password = await bcrypt.hash(generatedPassword, 12);
 
   const saved = await dbInsert("employees", {
     id: `EMP-${Date.now()}`,
@@ -1067,7 +1126,7 @@ router.post("/employees", async (req, res) => {
     login_id,
     login_password,
   }, db.employees);
-  res.json({ ...saved, login_id, login_password });
+  res.json({ ...saved, login_id, login_password: generatedPassword });
 });
 
 router.delete("/employees/:id", async (req, res) => {
@@ -1084,7 +1143,10 @@ router.patch("/employees/:id", async (req, res) => {
   if (full_name !== undefined)               patch.full_name              = full_name;
   if (avatar !== undefined)                  patch.avatar                 = avatar;
   if (login_id !== undefined)                patch.login_id               = login_id.trim();
-  if (login_password !== undefined)          patch.login_password         = login_password.trim();
+  if (login_password !== undefined) {
+    const nextPassword = login_password.trim();
+    patch.login_password = isBcryptHash(nextPassword) ? nextPassword : await bcrypt.hash(nextPassword, 12);
+  }
   if (designation_tag !== undefined)         patch.designation_tag        = sanitize(designation_tag);
   if (phone_number !== undefined)            patch.phone_number           = phone_number || null;
   if (salary_type_flag !== undefined)        patch.salary_type_flag       = salary_type_flag;
@@ -1095,9 +1157,7 @@ router.patch("/employees/:id", async (req, res) => {
   const local = db.employees.find((e: any) => e.id === req.params.id);
   if (local) Object.assign(local, patch);
   if (supabase) {
-    console.log("[employees PATCH] id:", req.params.id, "patch:", JSON.stringify(patch));
     const { data, error } = await supabase.from("employees").update(patch).eq("id", req.params.id).select();
-    console.log("[employees PATCH] result:", JSON.stringify(data), "error:", error?.message);
     if (error) { return res.status(500).json({ error: error.message }); }
     if (!data || data.length === 0) { console.warn("[employees PATCH] No rows updated — id not found in Supabase:", req.params.id); }
   }
@@ -1364,6 +1424,11 @@ router.post("/reviews", async (req, res) => {
 });
 
 router.delete("/reviews/:id", async (req, res) => {
+  const token = extractSessionToken(req);
+  const session = token ? await getSession(token) : null;
+  if (!session || (session.role !== "Admin" && !session.employeeId)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
   if (!db.reviews) db.reviews = [];
   await dbDelete("reviews", req.params.id);
   const idx = db.reviews.findIndex((r: any) => r.id === req.params.id);

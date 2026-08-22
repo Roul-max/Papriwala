@@ -1,16 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { Phone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useAuthSession } from "../../hooks/useAuthSession";
 
 export default function SplashLogin() {
   const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { status, session, refreshAuth } = useAuthSession();
 
   useEffect(() => {
-    if (localStorage.getItem("customerToken")) navigate("/", { replace: true });
-  }, []);
+    if (status !== "authenticated" || !session) return;
+    if (session.role === "Customer") navigate("/", { replace: true });
+    else navigate("/admin/login", { replace: true });
+  }, [navigate, session, status]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,7 +32,6 @@ export default function SplashLogin() {
       ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
       localStorage.setItem("customerRole", "Customer");
       localStorage.setItem("customerName", data.name || "Customer");
-      localStorage.setItem("customerToken", data.sessionToken || "");
       localStorage.setItem("customerPhone", phone);
       localStorage.setItem("employeePhone", phone);
       localStorage.setItem("customerId", data.customer_id);
@@ -36,6 +39,7 @@ export default function SplashLogin() {
       if (data.avatar) localStorage.setItem("customerAvatar", data.avatar);
       else localStorage.removeItem("customerAvatar");
       window.dispatchEvent(new Event("customerProfileUpdated"));
+      await refreshAuth();
       navigate("/");
     } catch { setError("Server error. Please try again."); }
     finally { setLoading(false); }
@@ -64,7 +68,7 @@ export default function SplashLogin() {
 
       {/* Login Sheet */}
       <div className="bg-cream-light rounded-t-3xl p-8 pb-12 relative z-10 shadow-[0_-10px_40px_rgba(0,0,0,0.3)]">
-        <h2 className="text-2xl font-bold text-maroon mb-1">Welcome!</h2>
+        <h2 className="text-2xl font-bold text-maroon mb-1">Customer Login</h2>
         <p className="text-gray-500 mb-6 text-sm">Enter your phone number to start ordering</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">

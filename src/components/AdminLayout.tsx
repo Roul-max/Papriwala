@@ -120,8 +120,7 @@ export default function AdminLayout() {
     const onPageShow = (e: PageTransitionEvent) => {
       if (e.persisted) {
         const role = localStorage.getItem("adminRole");
-        const token = localStorage.getItem("sessionToken");
-        if (!role || !token) window.location.replace("/admin/login");
+        if (!role) window.location.replace("/admin/login");
       }
     };
     window.addEventListener("pageshow", onPageShow);
@@ -283,8 +282,7 @@ export default function AdminLayout() {
   };
 
   const handleLogout = () => {
-    const token = localStorage.getItem("sessionToken") || "";
-    if (token) apiFetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token } }).catch(() => {});
+    apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
     sessionStorage.clear();
     window.location.replace("/admin/login");

@@ -31,7 +31,7 @@ export default function AdminDashboard() {
           if (ord.order_status !== "Paid" || (!ord.timestamp && !ord.created_at)) return false;
           return toBusinessDateString(ord.timestamp || ord.created_at) === today;
         })
-        .reduce((sum: number, ord: any) => sum + (ord.items?.reduce((s: number, it: any) => s + (it.qty || 1), 0) || 0), 0);
+        .reduce((sum: number, ord: any) => sum + (Array.isArray(ord.items) ? ord.items.filter((it: any) => (Number(it?.qty) || 0) > 0).length : 0), 0);
       setTodayItemSaleCount(todaySoldItems);
     } finally {
       setLoading(false);

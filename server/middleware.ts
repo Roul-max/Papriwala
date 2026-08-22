@@ -3,6 +3,8 @@ import { db, supabase } from "./db.js";
 import { broadcast } from "./ws.js";
 import crypto from "crypto";
 
+const isDev = process.env.NODE_ENV !== "production";
+
 // ─── Session interface ────────────────────────────────────────────────────────
 export interface Session {
   role: string;
@@ -12,9 +14,38 @@ export interface Session {
 }
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const SESSION_COOKIE_NAME = "papriwale_session";
 
 // In-memory fallback (used only when Supabase is unavailable)
 export const sessionStore = new Map<string, Session>();
+
+function getCookieValue(cookieHeader: string | undefined, name: string): string {
+  if (!cookieHeader) return "";
+  const parts = cookieHeader.split(";");
+  for (const part of parts) {
+    const [key, ...valueParts] = part.trim().split("=");
+    if (key === name) return decodeURIComponent(valueParts.join("=") || "");
+  }
+  return "";
+}
+
+export function extractSessionTokenFromCookie(cookieHeader: string | undefined): string {
+  return getCookieValue(cookieHeader, SESSION_COOKIE_NAME);
+}
+
+export function extractSessionToken(req: Request): string {
+  return extractSessionTokenFromCookie(req.header("cookie"));
+}
+
+export function buildSessionCookie(token: string): string {
+  const secure = process.env.NODE_ENV === "production" ? "Secure; " : "";
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; ${secure}Max-Age=${SESSION_TTL_MS / 1000}`;
+}
+
+export function clearSessionCookie(): string {
+  const secure = process.env.NODE_ENV === "production" ? "Secure; " : "";
+  return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; ${secure}Max-Age=0`;
+}
 
 export async function createSession(role: string, name: string, employeeId?: string): Promise<string> {
   const token = crypto.randomBytes(32).toString("hex");
@@ -28,7 +59,7 @@ export async function createSession(role: string, name: string, employeeId?: str
       created_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
     });
-    if (error) console.warn("[createSession] Supabase insert failed (sessions table may not exist):", error.message);
+    if (error && isDev) console.warn("[createSession] Supabase insert failed (sessions table may not exist):", error.message);
   }
   sessionStore.set(token, session);
   return token;
@@ -62,7 +93,10 @@ export async function getSession(token: string): Promise<Session | null> {
     try {
       const { data, error } = await supabase.from("sessions").select("*").eq("token", token).maybeSingle();
       // If sessions table doesn't exist yet, treat as no session (don't crash)
-      if (error) { console.warn("[getSession] Supabase error:", error.message); return null; }
+      if (error) {
+        if (isDev) console.warn("[getSession] Supabase error:", error.message);
+        return null;
+      }
       if (!data) return null;
       if (new Date(data.expires_at).getTime() < Date.now()) {
         try { await supabase.from("sessions").delete().eq("token", token); } catch {}
@@ -85,10 +119,7 @@ const PUBLIC_PATHS = new Set([
   "/health",
   "/auth/login",
   "/auth/set-password",
-  "/auth/send-otp",
-  "/auth/verify-otp",
   "/auth/guest-login",
-  "/auth/guest-profile",
   "/auth/me",
 ]);
 
@@ -121,6 +152,29 @@ function deriveModule(path: string, method: string): string {
   return "POS Billing";
 }
 
+function isCustomerAllowedPath(path: string, method: string): boolean {
+  if (method === "GET" && (
+    path.startsWith("/products") ||
+    path.startsWith("/categories") ||
+    path.startsWith("/product-variants") ||
+    path.startsWith("/banners") ||
+    path === "/orders" ||
+    path === "/reviews" ||
+    path === "/search" ||
+    path === "/auth/me"
+  )) return true;
+
+  if (method === "POST" && (
+    path === "/orders" ||
+    path === "/reviews" ||
+    path === "/auth/logout"
+  )) return true;
+
+  if (method === "PATCH" && path === "/auth/guest-profile") return true;
+
+  return false;
+}
+
 // ─── Middleware ───────────────────────────────────────────────────────────────
 export async function roleAuthMiddleware(req: Request, res: Response, next: NextFunction) {
   const cleanPath = req.path.replace(/^\/api/, "");
@@ -132,9 +186,8 @@ export async function roleAuthMiddleware(req: Request, res: Response, next: Next
   // Allow order creation from both mobile (no token) and authenticated employees (POS billing)
   if (req.method === "POST" && req.path === "/orders") return next();
   if (req.path === "/reviews" && req.method === "POST") return next();
-  if (req.path.startsWith("/reviews/") && req.method === "DELETE") return next();
 
-  const token = req.header("X-Session-Token") || "";
+  const token = extractSessionToken(req);
   const session = token ? await getSession(token) : null;
 
   if (!session) return res.status(401).json({ error: "Unauthorized: invalid or expired session." });
@@ -142,7 +195,12 @@ export async function roleAuthMiddleware(req: Request, res: Response, next: Next
   (req as any).session = session;
   const { role } = session;
 
-  if (role === "Admin" || role === "Customer") return next();
+  if (role === "Admin") return next();
+
+  if (role === "Customer") {
+    if (isCustomerAllowedPath(req.path, req.method)) return next();
+    return res.status(403).json({ error: "403 Forbidden: Customer session cannot access this module." });
+  }
 
   // Allow employees to update their own profile (avatar/name) regardless of module permissions
   if (

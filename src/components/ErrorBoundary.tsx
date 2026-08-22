@@ -14,6 +14,33 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     return { hasError: true, message: err.message };
   }
 
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    const payload = {
+      message: error.message,
+      stack: error.stack || "",
+      componentStack: info.componentStack || "",
+      route: window.location.pathname,
+      userAgent: navigator.userAgent,
+      timestamp: new Date().toISOString(),
+    };
+
+    if (navigator.sendBeacon) {
+      try {
+        const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+        navigator.sendBeacon("/api/client-error", blob);
+        return;
+      } catch {}
+    }
+
+    fetch("/api/client-error", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      keepalive: true,
+      credentials: "same-origin",
+    }).catch(() => {});
+  }
+
   render() {
     if (this.state.hasError) {
       return (

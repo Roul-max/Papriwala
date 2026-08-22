@@ -3,11 +3,14 @@ import { db, supabase, dbInsert } from "./db.js";
 import crypto from "crypto";
 
 const clients = new Set<WebSocket>();
+const isDev = process.env.NODE_ENV !== "production";
 
 export function handleWebSocketConnection(ws: WebSocket) {
   clients.add(ws);
   ws.on("close", () => clients.delete(ws));
-  ws.on("error", console.error);
+  ws.on("error", (error) => {
+    if (isDev) console.error("[ws] client error:", error);
+  });
 }
 
 // Only these 3 types create persistent notifications

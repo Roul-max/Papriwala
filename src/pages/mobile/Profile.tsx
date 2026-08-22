@@ -1,19 +1,19 @@
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, User, LogOut, Camera, Edit2, Check, Trash2 } from "lucide-react";
 import React, { useState, useRef, useEffect } from "react";
+import { useAuthSession } from "../../hooks/useAuthSession";
 
 export default function Profile() {
   const navigate = useNavigate();
   const [avatar, setAvatar] = useState<string | null>(null);
-  const [name, setName] = useState("Guest");
+  const [name, setName] = useState("Customer");
   const [role, setRole] = useState("");
   const [phone, setPhone] = useState("");
   const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const isGuest = localStorage.getItem("guestBrowse") === "true" && !localStorage.getItem("customerToken");
+  const { refreshAuth } = useAuthSession();
 
   // Determine session type once on mount
   const isCustomer = !!localStorage.getItem("customerRole");
@@ -21,7 +21,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (isCustomer) {
-      setName(localStorage.getItem("customerName") || "Guest");
+      setName(localStorage.getItem("customerName") || "Customer");
       setRole(localStorage.getItem("customerRole") || "");
       setPhone(localStorage.getItem("employeePhone") || "");
       const av = localStorage.getItem("customerAvatar");
@@ -39,10 +39,9 @@ export default function Profile() {
     const customerId = localStorage.getItem("customerId");
     if (!customerId) return;
     try {
-      const token = localStorage.getItem("customerToken") || "";
       const res = await fetch("/api/auth/guest-profile", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", ...(token ? { "X-Session-Token": token, "X-User-Role": "Customer" } : {}) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customer_id: customerId,
           ...(updatedName !== undefined ? { name: updatedName } : {}),
@@ -51,10 +50,10 @@ export default function Profile() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        console.error("[guest-profile] save failed:", res.status, err);
+        console.error("[customer-profile] save failed:", res.status, err);
       }
     } catch (e) {
-      console.error("[guest-profile] network error:", e);
+      console.error("[customer-profile] network error:", e);
     }
   };
 
@@ -94,7 +93,7 @@ export default function Profile() {
         // Save to server only — no localStorage (avoids QuotaExceededError)
         await fetch("/api/auth/update-avatar", {
           method: "PATCH",
-          headers: { "Content-Type": "application/json", "X-Session-Token": localStorage.getItem("sessionToken") || "", "X-User-Role": localStorage.getItem("adminRole") || "" },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ avatar: b64 }),
         });
         window.dispatchEvent(new Event("avatarChanged"));
@@ -119,31 +118,24 @@ export default function Profile() {
     setIsEditingName(false);
   };
 
-  const handleLogout = () => {
-    if (isGuest) {
-      localStorage.removeItem("guestBrowse");
-      localStorage.removeItem("customerName");
-      navigate("/login");
-      return;
-    }
-    if (isCustomer || localStorage.getItem("guestBrowse") === "true") {
-      const token = localStorage.getItem("customerToken") || "";
-      if (token) fetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token, "X-User-Role": "Customer" } }).catch(() => {});
-      ["customerRole","customerName","customerToken","customerId","customerPhone","customerAvatar","employeePhone","isNewCustomer","orderHistory","guestBrowse"].forEach(k => localStorage.removeItem(k));
+  const handleLogout = async () => {
+    if (isCustomer) {
+      await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+      ["customerRole","customerName","customerToken","customerId","customerPhone","customerAvatar","employeePhone","isNewCustomer","orderHistory"].forEach(k => localStorage.removeItem(k));
       sessionStorage.clear();
       window.dispatchEvent(new Event("customerProfileUpdated"));
-      navigate("/login");
+      await refreshAuth();
+      window.location.replace("/login");
     } else if (isAdmin) {
-      const token = localStorage.getItem("sessionToken") || "";
-      if (token) fetch("/api/auth/logout", { method: "POST", headers: { "X-Session-Token": token } }).catch(() => {});
+      await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
       ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
       sessionStorage.clear();
-      navigate("/admin/login");
+      await refreshAuth();
+      window.location.replace("/admin/login");
     }
   };
 
   const roleBadge = () => {
-    if (isGuest) return <span className="bg-gray-100 text-gray-600 text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">Guest</span>;
     if (isCustomer) {
       if (isNewCustomer) return <span className="bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">🎉 New Customer</span>;
       return <span className="bg-maroon/10 text-maroon text-xs font-bold px-3 py-1 rounded-full mb-2 uppercase tracking-wider">Returning Customer</span>;
@@ -204,7 +196,7 @@ export default function Profile() {
 
           <button onClick={handleLogout}
             className="w-full bg-red-50 text-red-600 font-bold py-3 rounded-xl hover:bg-red-100 transition-colors border border-red-100 flex items-center justify-center gap-2 mt-2">
-            <LogOut size={20} /> {isGuest ? "Sign In with Phone" : "Logout"}
+            <LogOut size={20} /> Logout
           </button>
         </div>
 

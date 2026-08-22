@@ -1,3 +1,5 @@
+import React from "react";
+
 // QZ Tray integration for direct thermal printing (no browser popup)
 // Requires QZ Tray installed on the billing PC: https://qz.io
 // Set PRINTER_NAME below to match your exact Windows printer name (Devices & Printers)
@@ -58,14 +60,21 @@ Nh2lLUARvceHpbBzb2H82eEcrhcmwhNQ/TwNDbcb1Xl1vXDDXygQjKL9QPcM6sRx
 DuWHBlSTxgY62AI/TkUD
 -----END PRIVATE KEY-----`;
 
-import React from "react";
-import qz from "qz-tray";
-
+let qzModulePromise: Promise<any> | null = null;
 let qzConnecting = false;
+const isDev = process.env.NODE_ENV !== "production";
+
+async function getQz() {
+  if (!qzModulePromise) {
+    qzModulePromise = import("qz-tray");
+  }
+  const mod = await qzModulePromise;
+  return mod.default ?? mod;
+}
 
 async function connectQz(): Promise<boolean> {
   try {
-    // Set cert + signature only once
+    const qz = await getQz();
     if (!qz.security.getCertificatePromise?.()) {
       qz.security.setCertificatePromise((resolve: any) => resolve(QZ_CERT));
     }
@@ -76,9 +85,11 @@ async function connectQz(): Promise<boolean> {
           .replace(/\s+/g, "");
         const binaryKey = Uint8Array.from(atob(keyData), c => c.charCodeAt(0));
         crypto.subtle.importKey(
-          "pkcs8", binaryKey.buffer,
+          "pkcs8",
+          binaryKey.buffer,
           { name: "RSASSA-PKCS1-v1_5", hash: "SHA-1" },
-          false, ["sign"]
+          false,
+          ["sign"]
         ).then(key => {
           const encoder = new TextEncoder();
           return crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, encoder.encode(toSign));
@@ -90,13 +101,13 @@ async function connectQz(): Promise<boolean> {
 
     if (qz.websocket.isActive()) return true;
     if (qzConnecting) {
-      // Wait up to 5s for an in-progress connection
       for (let i = 0; i < 50; i++) {
         await new Promise(r => setTimeout(r, 100));
         if (qz.websocket.isActive()) return true;
       }
       return false;
     }
+
     qzConnecting = true;
     try {
       await qz.websocket.connect({ retries: 3, delay: 1 });
@@ -106,12 +117,11 @@ async function connectQz(): Promise<boolean> {
     }
   } catch (e: any) {
     qzConnecting = false;
-    console.warn("[QZ] Not connected:", e?.message);
+    if (isDev) console.warn("[QZ] Not connected:", e?.message);
     return false;
   }
 }
 
-// Build ESC/POS receipt data from order details
 function buildReceiptData(params: {
   invoiceNo: string;
   cashier: string;
@@ -125,22 +135,20 @@ function buildReceiptData(params: {
 }): string[] {
   const { invoiceNo, cashier, paymentMode, items, subtotal, discountTotal, taxes, grandTotal, otherCharges } = params;
   const now = new Date();
-  const date = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${now.getFullYear()}`;
-  const time = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+  const date = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()}`;
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
-  const ESC  = "\x1B";
-  const GS   = "\x1D";
-  const INIT = ESC + "\x40";           // Initialize
-  const CENTER = ESC + "\x61\x01";     // Center align
-  const LEFT   = ESC + "\x61\x00";     // Left align
-  const BOLD_ON  = ESC + "\x45\x01";
+  const ESC = "\x1B";
+  const GS = "\x1D";
+  const INIT = ESC + "\x40";
+  const CENTER = ESC + "\x61\x01";
+  const LEFT = ESC + "\x61\x00";
+  const BOLD_ON = ESC + "\x45\x01";
   const BOLD_OFF = ESC + "\x45\x00";
-  const DOUBLE_ON  = GS + "\x21\x11";  // Double width+height
+  const DOUBLE_ON = GS + "\x21\x11";
   const DOUBLE_OFF = GS + "\x21\x00";
-  const CUT  = GS + "\x56\x41\x10";   // Partial cut
-  const DRAWER = ESC + "\x70\x00\x19\xFA"; // Open cash drawer pin 2
-
-  const LW = 42; // characters per line on 80mm printer
+  const CUT = GS + "\x56\x41\x10";
+  const LW = 42;
 
   const pad = (left: string, right: string, width = LW) => {
     const gap = width - left.length - right.length;
@@ -153,14 +161,14 @@ function buildReceiptData(params: {
   items.forEach(item => {
     const isGm = (item.unit || "").toLowerCase() === "gm";
     const displayQty = isGm
-      ? (item.qty >= 1000 ? `${(item.qty/1000).toFixed(3)}kg` : `${item.qty}gm`)
+      ? (item.qty >= 1000 ? `${(item.qty / 1000).toFixed(3)}kg` : `${item.qty}gm`)
       : String(item.qty);
     const name = (item.name + (item.size ? ` (${item.size})` : "")).slice(0, 22);
-    const amt  = `${(item.price * item.qty).toFixed(2)}`;
+    const amt = `${(item.price * item.qty).toFixed(2)}`;
     itemLines += pad(`${name} x${displayQty}`, `Rs.${amt}`) + "\n";
   });
 
-  const data: string[] = [
+  return [
     INIT,
     CENTER, BOLD_ON, DOUBLE_ON,
     "BADRINARAYAN PAPRIWALE\n",
@@ -183,7 +191,7 @@ function buildReceiptData(params: {
     divider,
     pad("Subtotal:", `Rs.${subtotal.toFixed(2)}`) + "\n",
     ...(discountTotal > 0 ? [pad("Discount:", `-Rs.${discountTotal.toFixed(2)}`) + "\n"] : []),
-    ...((otherCharges ?? 0) > 0 ? [pad("Other Charges:", `Rs.${(otherCharges!).toFixed(2)}`) + "\n"] : []),
+    ...((otherCharges ?? 0) > 0 ? [pad("Other Charges:", `Rs.${(otherCharges ?? 0).toFixed(2)}`) + "\n"] : []),
     pad("Tax 5% (incl.):", `Rs.${taxes.toFixed(2)}`) + "\n",
     divider,
     CENTER, BOLD_ON, DOUBLE_ON,
@@ -196,37 +204,30 @@ function buildReceiptData(params: {
     "\n\n\n",
     CUT,
   ];
-
-  return data;
 }
 
-// Main hook
 export function usePrinter() {
-  // Eagerly connect to QZ Tray on mount so it's ready before first print
   React.useEffect(() => {
     connectQz().then(ok => {
-      if (ok) console.log("[QZ] Connected and ready.");
-      else console.warn("[QZ] Not available — will use browser print fallback.");
+      if (isDev && ok) console.log("[QZ] Connected and ready.");
+      if (isDev && !ok) console.warn("[QZ] Not available - will use browser print fallback.");
     });
   }, []);
+
   const printReceipt = async (
     params: Parameters<typeof buildReceiptData>[0],
     openDrawer = false
   ): Promise<{ ok: boolean; fallback?: boolean }> => {
     const connected = await connectQz();
-
-    if (!connected) {
-      // QZ Tray not running — fall back to browser iframe print
-      return { ok: false, fallback: true };
-    }
+    if (!connected) return { ok: false, fallback: true };
 
     try {
+      const qz = await getQz();
       const printerName = PRINTER_NAME || await qz.printers.getDefault();
       const config = qz.configs.create(printerName);
       const data = buildReceiptData(params);
 
       if (openDrawer) {
-        // Append cash drawer open command after cut
         data.push("\x1B\x70\x00\x19\xFA");
       }
 
@@ -235,7 +236,7 @@ export function usePrinter() {
       await qz.print(config, [{ type: "raw", format: "base64", data: b64 }]);
       return { ok: true };
     } catch (e: any) {
-      console.error("[usePrinter] QZ print error:", e?.message);
+      if (isDev) console.error("[usePrinter] QZ print error:", e?.message);
       return { ok: false, fallback: true };
     }
   };
@@ -244,6 +245,7 @@ export function usePrinter() {
     const connected = await connectQz();
     if (!connected) return;
     try {
+      const qz = await getQz();
       const printerName = PRINTER_NAME || await qz.printers.getDefault();
       const config = qz.configs.create(printerName);
       await qz.print(config, [{ type: "raw", format: "base64", data: btoa("\x1B\x70\x00\x19\xFA") }]);

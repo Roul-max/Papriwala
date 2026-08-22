@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { User, Lock, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useAuthSession } from "../../hooks/useAuthSession";
 
 export default function AdminLogin() {
   const [role, setRole] = useState<"Admin" | "Employee">("Admin");
+  const navigate = useNavigate();
+  const { status, session } = useAuthSession();
 
   // Block back navigation to authenticated pages
   useEffect(() => {
@@ -19,6 +22,11 @@ export default function AdminLogin() {
       window.removeEventListener("pageshow", onPageShow);
     };
   }, []);
+  useEffect(() => {
+    if (status !== "authenticated" || !session || session.role === "Customer") return;
+    const dest = session.role === "Admin" ? "/admin/dashboard" : "/admin";
+    navigate(dest, { replace: true });
+  }, [navigate, session, status]);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -28,7 +36,6 @@ export default function AdminLogin() {
   const [confirmPass, setConfirmPass] = useState("");
   const [setupMsg, setSetupMsg] = useState("");
   const [showPass, setShowPass] = useState(false);
-  const navigate = useNavigate();
 
   const handleSetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,7 +74,6 @@ export default function AdminLogin() {
       }
       localStorage.setItem("adminRole",    data.role);
       localStorage.setItem("adminName",    data.name);
-      localStorage.setItem("sessionToken", data.sessionToken);
       if (data.employee_id) localStorage.setItem("employeeId", data.employee_id);
       if (data.avatar)      localStorage.setItem("adminAvatar", data.avatar);
       if (data.permissions) localStorage.setItem("accessPermissions", JSON.stringify({ [data.role]: data.permissions }));
@@ -211,12 +217,6 @@ export default function AdminLogin() {
               {loading ? "Logging in..." : "Login"}
             </button>
           </form>
-
-          <div className="lg:hidden text-center mt-6">
-            <button onClick={() => navigate("/login")} className="text-maroon text-sm font-semibold hover:underline">
-              Login With Number →
-            </button>
-          </div>
 
         </div>
 

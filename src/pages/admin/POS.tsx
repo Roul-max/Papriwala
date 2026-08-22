@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { Search, Plus, Trash2, Printer, ShoppingCart, X, FileDown, EyeOff } from "lucide-react";
-import jsPDF from "jspdf";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
 import { getCurrentBusinessDateString, toBusinessDateString } from "../../lib/businessTime";
@@ -201,8 +200,9 @@ export default function POS() {
   const grandTotal = Math.max(0, (subtotal - discountTotal) + otherCharges);
 
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (cart.length === 0) return;
+    const { default: jsPDF } = await import("jspdf");
     // Thermal receipt: 80mm = ~226.77pt
     const pageW = 226.77;
     const doc = new jsPDF({ unit: "pt", format: [pageW, 800] });
@@ -445,7 +445,7 @@ export default function POS() {
       const res = await apiFetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: paymentMode, items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, created_by: createdBy })
+        body: JSON.stringify({ order_source: "Direct POS", order_status: "Paid", payment_mode: paymentMode, items: cart, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, created_by: createdBy })
       });
       if (!res.ok) {
         const data = await res.json();
@@ -700,7 +700,7 @@ export default function POS() {
               await apiFetch("/api/deleted-bills", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ items: cart, grand_total: grandTotal, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, payment_mode: paymentMode, created_by: createdBy })
+                body: JSON.stringify({ items: cart, discount_applied: discountTotal, tax_collected: taxes, extraneous_charges: otherCharges, other_charges_desc: otherChargesDesc, payment_mode: paymentMode, created_by: createdBy })
               });
               setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
               generateInvoiceNo();

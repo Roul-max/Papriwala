@@ -41,14 +41,13 @@ export default function Checkout() {
   const [razorpayPreparing, setRazorpayPreparing] = useState(false);
   const [razorpayDraftOrder, setRazorpayDraftOrder] = useState<any>(null);
 
-  const isGuest = !localStorage.getItem("customerToken");
+  const isGuest = !localStorage.getItem("customerRole");
 
   const urlParams = new URLSearchParams(window.location.search);
   const tableId = urlParams.get("table_id") || sessionStorage.getItem("qr_table_id") || "Counter";
 
   const buildOrderPayload = () => ({
     table_id: tableId,
-    grand_total: total,
     order_status: "Paid",
     order_source: "QR Table Menu",
     payment_method: method,

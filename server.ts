@@ -6,12 +6,21 @@ import { WebSocketServer } from "ws";
 import { createServer } from "http";
 import apiRoutes from "./server/api.js";
 import { handleWebSocketConnection } from "./server/ws.js";
+import { extractSessionTokenFromCookie, getSession } from "./server/middleware.js";
 import { bootstrapDb } from "./server/db.js";
 
 async function startServer() {
   await bootstrapDb();
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
+  let shuttingDown = false;
+
+  const shutdown = (code: number) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    httpServer.close(() => process.exit(code));
+    setTimeout(() => process.exit(code), 5000).unref();
+  };
 
   // ── Security headers ────────────────────────────────────────────────────────
   app.use((_req, res, next) => {
@@ -21,6 +30,20 @@ async function startServer() {
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
     if (process.env.NODE_ENV === "production") {
+      res.setHeader(
+        "Content-Security-Policy",
+        [
+          "default-src 'self'",
+          "base-uri 'self'",
+          "frame-ancestors 'none'",
+          "form-action 'self'",
+          "img-src 'self' data: https:",
+          "font-src 'self' data:",
+          "style-src 'self' 'unsafe-inline' https:",
+          "script-src 'self'",
+          "connect-src 'self' https: wss:",
+        ].join("; ")
+      );
       res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     }
     next();
@@ -30,71 +53,6 @@ async function startServer() {
   app.use(express.json({ limit: "5mb" }));
 
   // ── Guest profile — registered directly, never blocked by any middleware ────
-  app.patch("/api/auth/guest-profile", async (req: express.Request, res: express.Response) => {
-    const { db, supabase } = await import("./server/db.js");
-    const { customer_id, name, avatar } = req.body;
-    if (!customer_id) { res.status(400).json({ error: "customer_id required" }); return; }
-    if (!db.guest_customers) db.guest_customers = [];
-    const patch: any = {};
-    if (name !== undefined)   patch.name   = name.replace(/[<>"'`;]/g, "").trim().slice(0, 500);
-    if (avatar !== undefined) patch.avatar = avatar;
-    if (Object.keys(patch).length === 0) { res.json({ success: true }); return; }
-    const mem = db.guest_customers.find((c: any) => c.id === customer_id);
-    if (mem) Object.assign(mem, patch);
-    if (supabase) {
-      const { error } = await supabase.from("guest_customers").update(patch).eq("id", customer_id);
-      if (error) {
-        console.error("[guest-profile] Supabase update failed:", error.message);
-        res.status(500).json({ error: error.message }); return;
-      }
-      console.log(`[guest-profile] Saved for ${customer_id}: name=${patch.name ?? "-"} avatar=${patch.avatar ? "yes" : "-"}`);
-    }
-    res.json({ success: true });
-  });
-
-  app.post("/api/auth/guest-login", async (req: express.Request, res: express.Response) => {
-    const { db, supabase } = await import("./server/db.js");
-    const { createSession } = await import("./server/middleware.js");
-    const phone = (req.body.phone ?? "").trim();
-    if (!phone || !/^\d{10}$/.test(phone)) { res.status(400).json({ error: "Valid 10-digit phone required" }); return; }
-    if (!db.guest_customers) db.guest_customers = [];
-    let customer: any = null;
-    let isNew = false;
-    if (supabase) {
-      const { data, error } = await supabase.from("guest_customers").select("*").eq("phone", phone).maybeSingle();
-      if (error) console.error("[guest-login] Supabase lookup error:", error.message);
-      if (data) {
-        customer = data;
-        const idx = db.guest_customers.findIndex((c: any) => c.id === data.id);
-        if (idx >= 0) db.guest_customers[idx] = data; else db.guest_customers.push(data);
-        console.log(`[guest-login] Returning: ${data.name} | avatar: ${data.avatar ? "yes" : "no"}`);
-      } else {
-        isNew = true;
-        const newCust = { id: `CUST-${Date.now()}`, name: "Customer", phone, avatar: null, created_at: new Date().toISOString() };
-        const { data: inserted, error: insertErr } = await supabase.from("guest_customers").insert(newCust).select().single();
-        if (insertErr) {
-          console.error("[guest-login] Insert failed:", insertErr.message);
-          const { data: refetched } = await supabase.from("guest_customers").select("*").eq("phone", phone).maybeSingle();
-          customer = refetched || newCust;
-          if (refetched) isNew = false;
-        } else {
-          customer = inserted || newCust;
-        }
-        const idx = db.guest_customers.findIndex((c: any) => c.id === customer.id);
-        if (idx >= 0) db.guest_customers[idx] = customer; else db.guest_customers.push(customer);
-      }
-    } else {
-      customer = db.guest_customers.find((c: any) => c.phone === phone) || null;
-      if (!customer) {
-        isNew = true;
-        customer = { id: `CUST-${Date.now()}`, name: "Customer", phone, avatar: null, created_at: new Date().toISOString() };
-        db.guest_customers.push(customer);
-      }
-    }
-    const token = await createSession("Customer", customer.name, customer.id);
-    res.json({ success: true, customer_id: customer.id, name: customer.name, avatar: customer.avatar || null, phone, is_new: isNew, sessionToken: token });
-  });
-
   // API Routes
   app.use("/api", apiRoutes);
 
@@ -102,7 +60,15 @@ async function startServer() {
 
   // WebSocket Setup
   const wss = new WebSocketServer({ server: httpServer, path: "/api/ws" });
-  wss.on("connection", handleWebSocketConnection);
+  wss.on("connection", async (ws, req) => {
+    const token = extractSessionTokenFromCookie(req.headers.cookie);
+    const session = token ? await getSession(token) : null;
+    if (!session || session.role === "Customer") {
+      ws.close(1008, "Unauthorized");
+      return;
+    }
+    handleWebSocketConnection(ws);
+  });
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
@@ -126,12 +92,20 @@ async function startServer() {
   });
 
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT} [${process.env.NODE_ENV || "development"}]`);
+    console.info(`Server running on http://localhost:${PORT} [${process.env.NODE_ENV || "development"}]`);
   });
 
   // ── Graceful shutdown ───────────────────────────────────────────────────────
-  process.on("SIGTERM", () => { httpServer.close(() => process.exit(0)); });
-  process.on("SIGINT",  () => { httpServer.close(() => process.exit(0)); });
+  process.on("SIGTERM", () => { shutdown(0); });
+  process.on("SIGINT",  () => { shutdown(0); });
+  process.on("unhandledRejection", (reason) => {
+    console.error("[Unhandled Rejection]", reason);
+    shutdown(1);
+  });
+  process.on("uncaughtException", (error) => {
+    console.error("[Uncaught Exception]", error);
+    shutdown(1);
+  });
 }
 
 startServer().catch(err => { console.error("Failed to start server:", err); process.exit(1); });
