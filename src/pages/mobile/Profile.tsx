@@ -1,7 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, User, LogOut, Camera, Edit2, Check, Trash2 } from "lucide-react";
 import React, { useState, useRef, useEffect } from "react";
-import { useAuthSession } from "../../hooks/useAuthSession";
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -12,8 +11,8 @@ export default function Profile() {
   const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { refreshAuth } = useAuthSession();
 
   // Determine session type once on mount
   const isCustomer = !!localStorage.getItem("customerRole");
@@ -119,21 +118,31 @@ export default function Profile() {
   };
 
   const handleLogout = async () => {
+    setIsLoggingOut(true);
     if (isCustomer) {
       await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
       ["customerRole","customerName","customerToken","customerId","customerPhone","customerAvatar","employeePhone","isNewCustomer","orderHistory"].forEach(k => localStorage.removeItem(k));
       sessionStorage.clear();
       window.dispatchEvent(new Event("customerProfileUpdated"));
-      await refreshAuth();
       window.location.replace("/login");
     } else if (isAdmin) {
       await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
       ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
       sessionStorage.clear();
-      await refreshAuth();
       window.location.replace("/admin/login");
     }
   };
+
+  if (isLoggingOut) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-cream-light text-maroon">
+        <div className="text-center">
+          <div className="mx-auto mb-3 h-10 w-10 rounded-full border-2 border-maroon border-t-transparent animate-spin" />
+          <p className="font-semibold">Signing out...</p>
+        </div>
+      </div>
+    );
+  }
 
   const roleBadge = () => {
     if (isCustomer) {

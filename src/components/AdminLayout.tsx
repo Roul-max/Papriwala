@@ -77,6 +77,7 @@ export default function AdminLayout() {
   const [searchQuery,   setSearchQuery]   = useState("");
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
   const [searchBlocked, setSearchBlocked] = useState<string | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isMobile,      setIsMobile]      = useState(window.innerWidth < 768);
   const [isOffline,     setIsOffline]     = useState(!navigator.onLine);
 
@@ -281,8 +282,11 @@ export default function AdminLayout() {
     }
   };
 
-  const handleLogout = () => {
-    apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await apiFetch("/api/auth/logout", { method: "POST" });
+    } catch {}
     ["adminRole","adminName","sessionToken","employeeId","adminAvatar","accessPermissions"].forEach(k => localStorage.removeItem(k));
     sessionStorage.clear();
     window.location.replace("/admin/login");
@@ -294,6 +298,17 @@ export default function AdminLayout() {
     setUnreadCount(0);
     setQrOrderMap({});
   };
+
+  if (isLoggingOut) {
+    return (
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-cream-light text-maroon">
+        <div className="text-center">
+          <div className="mx-auto mb-3 h-10 w-10 rounded-full border-2 border-maroon border-t-transparent animate-spin" />
+          <p className="font-semibold">Signing out...</p>
+        </div>
+      </div>
+    );
+  }
 
   const printQrOrderFallback = useCallback((order: PrintableOrder) => {
     const w = window.open("", "", "width=400,height=600");
