@@ -21,6 +21,76 @@ function sanitize(val: any): string {
   return val.replace(/[<>"'`;]/g, "").trim().slice(0, 500);
 }
 
+type VariantPayload = {
+  variant_id?: string;
+  size_label: string;
+  variant_price_modifier: number;
+};
+
+function normalizeVariantPayload(variants: any[], basePrice: number): VariantPayload[] {
+  if (!Array.isArray(variants)) return [];
+  return variants
+    .map((variant, index) => {
+      const sizeLabel = sanitize(variant?.size_label ?? variant?.sizeLabel ?? variant?.label ?? "");
+      const rawPrice = Number(
+        variant?.variant_price ??
+        variant?.price ??
+        variant?.final_price ??
+        variant?.finalPrice
+      );
+      const rawModifier = Number(
+        variant?.variant_price_modifier ??
+        variant?.price_modifier ??
+        variant?.modifier
+      );
+      const modifier = Number.isFinite(rawModifier) && rawModifier > 0
+        ? rawModifier
+        : (basePrice > 0 && Number.isFinite(rawPrice) && rawPrice > 0 ? rawPrice / basePrice : 0);
+
+      return {
+        variant_id: sanitize(variant?.variant_id || `VAR-${Date.now()}-${index + 1}`),
+        size_label: sizeLabel,
+        variant_price_modifier: modifier,
+      };
+    })
+    .filter((variant) => variant.size_label && Number.isFinite(variant.variant_price_modifier) && variant.variant_price_modifier > 0);
+}
+
+async function syncProductVariants(productId: string, variants: any[] | undefined, basePrice: number): Promise<void> {
+  const normalized = normalizeVariantPayload(variants || [], basePrice);
+
+  if (!db.product_variants) db.product_variants = [];
+  db.product_variants = db.product_variants.filter((variant: any) => variant.product_id !== productId);
+
+  if (normalized.length > 0) {
+    const localRows = normalized.map((variant) => ({
+      ...variant,
+      product_id: productId,
+    }));
+    db.product_variants.push(...localRows);
+
+    if (supabase) {
+      try {
+        await supabase.from("product_variants").delete().eq("product_id", productId);
+        const { error } = await supabase.from("product_variants").insert(localRows);
+        if (error) console.error("[product-variants] Supabase insert failed:", error.message);
+      } catch (error: any) {
+        console.error("[product-variants] Supabase sync failed:", error?.message || error);
+      }
+    }
+    return;
+  }
+
+  if (supabase) {
+    try {
+      const { error } = await supabase.from("product_variants").delete().eq("product_id", productId);
+      if (error) console.error("[product-variants] Supabase delete failed:", error.message);
+    } catch (error: any) {
+      console.error("[product-variants] Supabase delete failed:", error?.message || error);
+    }
+  }
+}
+
 // ─── Auth (public, no middleware) ────────────────────────────────────────────
 
 router.post("/auth/login", async (req, res) => {
@@ -281,7 +351,7 @@ router.get("/products/:id", async (req, res) => {
 
 router.post("/products", async (req, res) => {
   const session = (req as any).session;
-  const { name, category, price, sku, unit, current_stock_qty, unit_purchase_cost, safety_low_threshold, image, description } = req.body;
+  const { name, category, price, sku, unit, current_stock_qty, unit_purchase_cost, safety_low_threshold, image, description, variants } = req.body;
   if (!name || !category) return res.status(400).json({ error: "name and category are required" });
   const newProduct = {
     id: `PRD-${Date.now()}`,
@@ -307,6 +377,7 @@ router.post("/products", async (req, res) => {
     operator: session?.name || "Admin",
     timestamp: new Date().toISOString(),
   }, db.inventory_log);
+  await syncProductVariants(saved.id, unit === "pcs" ? [] : variants, Number(saved.price) || Number(newProduct.price) || 0);
   res.json(saved);
 });
 
@@ -314,6 +385,7 @@ router.delete("/products/:id", async (req, res) => {
   await dbDelete("products", req.params.id);
   const idx = db.products.findIndex((p: any) => p.id === req.params.id);
   if (idx !== -1) db.products.splice(idx, 1);
+  await syncProductVariants(req.params.id, [], 0);
   res.json({ success: true });
 });
 
@@ -321,6 +393,14 @@ router.patch("/products/:id", async (req, res) => {
   const updated = await dbUpdate("products", req.params.id, req.body);
   const local = db.products.find((p: any) => p.id === req.params.id);
   if (local) Object.assign(local, req.body);
+  if (Object.prototype.hasOwnProperty.call(req.body, "variants") || Object.prototype.hasOwnProperty.call(req.body, "unit")) {
+    const effectiveUnit = req.body.unit ?? updated?.unit ?? local?.unit ?? "pcs";
+    await syncProductVariants(
+      req.params.id,
+      effectiveUnit === "pcs" ? [] : req.body.variants,
+      Number(req.body.price ?? updated?.price ?? local?.price ?? 0)
+    );
+  }
   res.json(updated);
 });
 

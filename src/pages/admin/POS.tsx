@@ -24,6 +24,7 @@ export default function POS() {
   const [variantSize, setVariantSize] = useState("");
   const [variantQty, setVariantQty] = useState(1);
   const [variantCustomPrice, setVariantCustomPrice] = useState<number | "">("");
+  const [variantAmount, setVariantAmount] = useState<number | "">("");
   const [quickAddModal, setQuickAddModal] = useState<{ product: any } | null>(null);
   const [quickQty, setQuickQty] = useState<number | "">("");
   const [quickAmount, setQuickAmount] = useState<number | "">("");
@@ -49,6 +50,7 @@ export default function POS() {
   const access = useAccess("POS Billing");
   const isReadOnly = access === "Read-Only";
   const { printReceipt, openCashDrawer } = usePrinter();
+  const isWeightBasedUnit = (unit?: string) => (unit || "pcs").toLowerCase() !== "pcs";
 
   const refreshAnalytics = () => {
     const today = getCurrentBusinessDateString();
@@ -110,6 +112,7 @@ export default function POS() {
       setVariantQty(1);
       const defaultPrice = product.price * productVariants[0].variant_price_modifier;
       setVariantCustomPrice(defaultPrice);
+      setVariantAmount(defaultPrice);
       setVariantUnit(product.unit || "pcs");
     } else {
       setQuickAddModal({ product });
@@ -120,10 +123,12 @@ export default function POS() {
 
   const confirmVariantAdd = () => {
     if (!variantModal) return;
-    const finalPrice = variantCustomPrice !== "" ? Number(variantCustomPrice) : (() => {
-      const v = variantModal.variants.find(v => v.size_label === variantSize);
-      return v ? variantModal.product.price * v.variant_price_modifier : variantModal.product.price;
-    })();
+    const selectedVariant = variantModal.variants.find(v => v.size_label === variantSize);
+    const basePrice = selectedVariant ? variantModal.product.price * selectedVariant.variant_price_modifier : variantModal.product.price;
+    const isWeightBased = isWeightBasedUnit(variantModal.product.unit);
+    const finalPrice = isWeightBased && variantAmount !== "" && variantQty > 0
+      ? Number((Number(variantAmount) / variantQty).toFixed(4))
+      : (variantCustomPrice !== "" ? Number(variantCustomPrice) : basePrice);
     const key = `${variantModal.product.id}-${variantSize}`;
     const alreadyInCart = cart.find(item => item.id === key)?.qty || 0;
     if (alreadyInCart + variantQty > variantModal.product.current_stock_qty) {
@@ -141,8 +146,11 @@ export default function POS() {
   const confirmQuickAdd = () => {
     if (!quickAddModal) return;
     const p = quickAddModal.product;
-    const isGm = (p.unit || "pcs").toLowerCase() === "gm";
-    const finalQty = isGm
+    const unit = (p.unit || "pcs").toLowerCase();
+    const isGm = unit === "gm";
+    const isKg = unit === "kg";
+    const isWeightBased = isGm || isKg;
+    const finalQty = isWeightBased
       ? (quickQty !== "" ? Number(quickQty) : quickAmount !== "" ? parseFloat((Number(quickAmount) / p.price).toFixed(3)) : 0)
       : (quickQty !== "" ? Number(quickQty) : 0);
     if (!finalQty || finalQty <= 0) return;
@@ -727,7 +735,18 @@ export default function POS() {
                 {variantModal.variants.map(v => {
                   const price = variantModal.product.price * v.variant_price_modifier;
                   return (
-                    <label key={v.size_label} onClick={() => { setVariantSize(v.size_label); setVariantCustomPrice(price); }} className={`flex items-center justify-between p-3 rounded-lg border-2 cursor-pointer transition-colors ${variantSize === v.size_label ? "border-maroon bg-maroon/5" : "border-gray-200"}`}>
+                    <label
+                      key={v.size_label}
+                      onClick={() => {
+                        setVariantSize(v.size_label);
+                        if (isWeightBasedUnit(variantModal.product.unit)) {
+                          setVariantAmount(Number((price * variantQty).toFixed(2)));
+                        } else {
+                          setVariantCustomPrice(price);
+                        }
+                      }}
+                      className={`flex items-center justify-between p-3 rounded-lg border-2 cursor-pointer transition-colors ${variantSize === v.size_label ? "border-maroon bg-maroon/5" : "border-gray-200"}`}
+                    >
                       <div className="flex items-center gap-3">
                         <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${variantSize === v.size_label ? "border-maroon" : "border-gray-300"}`}>
                           {variantSize === v.size_label && <div className="w-2 h-2 rounded-full bg-maroon" />}
@@ -739,6 +758,45 @@ export default function POS() {
                   );
                 })}
               </div>
+              {isWeightBasedUnit(variantModal.product.unit) && (
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase font-semibold">Quantity ({variantModal.product.unit || "gm"})</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={variantQty}
+                      onChange={e => {
+                        const qty = Math.max(1, Number(e.target.value));
+                        setVariantQty(qty);
+                        const selected = variantModal.variants.find(v => v.size_label === variantSize);
+                        const unitPrice = selected ? variantModal.product.price * selected.variant_price_modifier : variantModal.product.price;
+                        setVariantAmount(Number((qty * unitPrice).toFixed(2)));
+                      }}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase font-semibold">Amount (₹)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={variantAmount}
+                      onChange={e => {
+                        const amount = e.target.value === "" ? "" : Number(e.target.value);
+                        setVariantAmount(amount);
+                        const selected = variantModal.variants.find(v => v.size_label === variantSize);
+                        const unitPrice = selected ? variantModal.product.price * selected.variant_price_modifier : variantModal.product.price;
+                        if (amount !== "") setVariantQty(Math.max(1, Number((Number(amount) / unitPrice).toFixed(3))));
+                      }}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    />
+                  </div>
+                </div>
+              )}
+              {!isWeightBasedUnit(variantModal.product.unit) && (
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <div>
                   <label className="text-[10px] text-gray-500 uppercase font-semibold">Unit</label>
@@ -753,6 +811,7 @@ export default function POS() {
                   <input type="number" min="1" value={variantQty} onChange={e => setVariantQty(Math.max(1, Number(e.target.value)))} className="w-full border border-gray-300 rounded px-3 py-2 text-sm" />
                 </div>
               </div>
+              )}
               <button onClick={confirmVariantAdd} className="w-full bg-maroon text-white font-bold py-3 rounded-lg hover:bg-maroon-light transition-colors uppercase tracking-wider text-sm">
                 CONFIRM AND ADD TO CHECKOUT TRAY
               </button>
@@ -766,10 +825,16 @@ export default function POS() {
         const p = quickAddModal.product;
         const unit = (p.unit || "pcs").toLowerCase();
         const isGm = unit === "gm";
-        const computedAmount = isGm
+        const isKg = unit === "kg";
+        const isWeightBased = isGm || isKg;
+        const summaryUnit = isGm ? "gm" : isKg ? "kg" : (p.unit || "pcs");
+        const priceLabel = isWeightBased
+          ? `₹${(isGm ? p.price * 1000 : p.price).toFixed(0)} / kg`
+          : `₹${Number(p.price).toFixed(2)} / ${summaryUnit}`;
+        const computedAmount = isWeightBased
           ? (quickQty !== "" ? parseFloat((Number(quickQty) * p.price).toFixed(2)) : quickAmount)
           : (quickQty !== "" ? parseFloat((Number(quickQty) * p.price).toFixed(2)) : "");
-        const computedQty = isGm && quickAmount !== "" && quickQty === ""
+        const computedQty = isWeightBased && quickAmount !== "" && quickQty === ""
           ? parseFloat((Number(quickAmount) / p.price).toFixed(3))
           : quickQty;
         return (
@@ -781,16 +846,15 @@ export default function POS() {
               </div>
               <div className="p-5">
                 <p className="font-semibold text-gray-800 mb-1">{p.name}</p>
-                <div className="flex gap-3 mb-4">
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded font-semibold select-none">{p.unit || "pcs"}</span>
-                  <span className="text-xs bg-maroon/10 text-maroon px-2 py-1 rounded font-semibold select-none">₹{isGm ? (p.price * 1000).toFixed(0) : p.price} / {isGm ? "kg" : (p.unit || "pcs")}</span>
+                <div className="text-xs bg-maroon/10 text-maroon px-2 py-1 rounded font-semibold select-none inline-block mb-4">
+                  {priceLabel}
                 </div>
-                <div className={`grid gap-3 mb-4 ${isGm ? "grid-cols-2" : "grid-cols-1"}`}>
+                <div className={`grid gap-3 mb-4 ${isWeightBased ? "grid-cols-2" : "grid-cols-1"}`}>
                   <div>
-                    <label className="text-[10px] text-gray-500 uppercase font-semibold">Quantity ({p.unit || "pcs"})</label>
+                    <label className="text-[10px] text-gray-500 uppercase font-semibold">Quantity ({isGm ? "gm" : isKg ? "kg" : (p.unit || "pcs")})</label>
                     <input
-                      type="number" min="0" step={isGm ? "1" : "1"}
-                      placeholder={isGm ? "Enter grams" : "Enter quantity"}
+                      type="number" min="0" step="1"
+                      placeholder={isWeightBased ? `Enter ${isGm ? "grams" : "kg"}` : "Enter quantity"}
                       value={quickQty}
                       onChange={e => {
                         const v = e.target.value === "" ? "" : Number(e.target.value);
@@ -801,7 +865,7 @@ export default function POS() {
                       className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon"
                     />
                   </div>
-                  {isGm && (
+                  {isWeightBased && (
                     <div>
                       <label className="text-[10px] text-gray-500 uppercase font-semibold">Amount (₹)</label>
                       <input
@@ -820,7 +884,11 @@ export default function POS() {
                   )}
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3 mb-4 flex justify-between items-center">
-                  <span className="text-xs text-gray-500">{isGm ? `${computedQty || 0} gm` : `${quickQty || 0} pcs`}</span>
+                  <span className="text-xs text-gray-500">
+                    {isWeightBased
+                      ? `${computedQty || 0} ${summaryUnit}`
+                      : `${quickQty || 0} ${summaryUnit}`}
+                  </span>
                   <span className="text-base font-bold text-maroon">₹{computedAmount || "0.00"}</span>
                 </div>
                 <button onClick={confirmQuickAdd} disabled={!quickQty && !quickAmount}

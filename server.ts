@@ -11,7 +11,7 @@ import { bootstrapDb } from "./server/db.js";
 async function startServer() {
   await bootstrapDb();
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // ── Security headers ────────────────────────────────────────────────────────
   app.use((_req, res, next) => {

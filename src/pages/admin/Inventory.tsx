@@ -4,6 +4,7 @@ import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
 type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; muted?: boolean; image?: string; unit?: string; description?: string; };
 type LogEntry = { id: string; type: "STOCK_IN" | "STOCK_OUT"; product_name: string; qty: number; reason: string; operator: string; timestamp: string; };
+type VariantDraft = { id: string; size_label: string; price: string };
 
 const EMPTY_PRODUCT = { name: "", sku: "", category: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "gm", image: "", description: "" };
 
@@ -24,6 +25,8 @@ export default function Inventory() {
 
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [variantDrafts, setVariantDrafts] = useState<VariantDraft[]>([]);
+  const [variantLoading, setVariantLoading] = useState(false);
 
   const [stockModal, setStockModal] = useState<{ product: Product; type: "in" | "out" } | null>(null);
   const [stockQty, setStockQty] = useState("");
@@ -51,6 +54,70 @@ export default function Inventory() {
     const nums = products.map(p => parseInt(p.sku?.replace(/\D/g, "") || "0")).filter(n => !isNaN(n));
     const next = nums.length ? Math.max(...nums) + 1 : 1;
     return `SKU${String(next).padStart(3, "0")}`;
+  };
+
+  const newVariantId = () => `variant-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+
+  const openAddProductModal = () => {
+    setEditProductId(null);
+    setAddForm({ ...EMPTY_PRODUCT, sku: nextSku() });
+    setVariantDrafts([]);
+    setShowAddModal(true);
+  };
+
+  const openEditProductModal = async (p: Product) => {
+    setEditProductId(p.id);
+    setAddForm({
+      name: p.name,
+      sku: p.sku,
+      category: p.category,
+      price: String(p.price),
+      current_stock_qty: String(p.current_stock_qty),
+      safety_low_threshold: String(p.safety_low_threshold),
+      unit: p.unit || "gm",
+      image: p.image || "",
+      description: p.description || "",
+    });
+    setVariantLoading(true);
+    setShowAddModal(true);
+    try {
+      const res = await apiFetch(`/api/product-variants?product_id=${p.id}`);
+      const json = await res.json();
+      const list = Array.isArray(json) ? json : [];
+      const basePrice = Number(p.price) || 0;
+      setVariantDrafts(list.map((variant: any) => ({
+        id: variant.variant_id || newVariantId(),
+        size_label: variant.size_label || "",
+        price: basePrice > 0 && variant.variant_price_modifier ? String(Number((basePrice * Number(variant.variant_price_modifier)).toFixed(2))) : "",
+      })));
+    } catch {
+      setVariantDrafts([]);
+    } finally {
+      setVariantLoading(false);
+    }
+  };
+
+  const addVariantRow = (sizeLabel = "", price = "") => {
+    setVariantDrafts(prev => [...prev, { id: newVariantId(), size_label: sizeLabel, price }]);
+  };
+
+  const addPresetVariant = (sizeLabel: string, modifier: number) => {
+    const basePrice = Number(addForm.price) || 0;
+    const computedPrice = basePrice > 0 ? (basePrice * modifier).toFixed(2) : "";
+    setVariantDrafts(prev => {
+      const idx = prev.findIndex(v => v.size_label.toLowerCase() === sizeLabel.toLowerCase());
+      const nextRow = { id: idx >= 0 ? prev[idx].id : newVariantId(), size_label: sizeLabel, price: computedPrice };
+      if (idx >= 0) return prev.map((v, i) => i === idx ? nextRow : v);
+      return [...prev, nextRow];
+    });
+  };
+
+  const updateVariantDraft = (id: string, patch: Partial<VariantDraft>) => {
+    setVariantDrafts(prev => prev.map(v => v.id === id ? { ...v, ...patch } : v));
+  };
+
+  const removeVariantDraft = (id: string) => {
+    setVariantDrafts(prev => prev.filter(v => v.id !== id));
   };
 
   const filtered = products.filter(p => {
@@ -109,6 +176,7 @@ export default function Inventory() {
     setShowAddModal(false);
     setEditProductId(null);
     setAddForm({ ...EMPTY_PRODUCT });
+    setVariantDrafts([]);
     fetchAll();
   };
 
@@ -186,7 +254,7 @@ export default function Inventory() {
               </span>
             )}
             {!isReadOnly && (
-              <button onClick={() => { setStockModal(null); setAddForm({ ...EMPTY_PRODUCT, sku: nextSku() }); setShowAddModal(true); }} className="bg-maroon hover:bg-maroon-light text-white px-4 py-2 rounded text-sm font-medium transition-colors flex items-center gap-1">
+              <button onClick={() => { setStockModal(null); openAddProductModal(); }} className="bg-maroon hover:bg-maroon-light text-white px-4 py-2 rounded text-sm font-medium transition-colors flex items-center gap-1">
                 <Plus size={16} /> Add Product
               </button>
             )}
@@ -254,7 +322,7 @@ export default function Inventory() {
                     <div className="flex justify-end gap-1">
                       {!isReadOnly && (
                         <>
-                          <button onClick={() => { setEditProductId(p.id); setAddForm({ name: p.name, sku: p.sku, category: p.category, price: String(p.price), current_stock_qty: String(p.current_stock_qty), safety_low_threshold: String(p.safety_low_threshold), unit: p.unit || "gm", image: p.image || "", description: p.description || "" }); setShowAddModal(true); }}
+                          <button onClick={() => { void openEditProductModal(p); }}
                             className="text-blue-600 hover:bg-blue-50 p-1.5 rounded" title="Edit"><Edit2 size={16} /></button>
                           <button onClick={() => { setStockModal({ product: p, type: "in" }); setStockQty(""); setStockReason(""); setStockError(""); }}
                             className="text-green-600 hover:bg-green-50 p-1.5 rounded" title="Stock In"><ArrowDownCircle size={16} /></button>
@@ -330,7 +398,7 @@ export default function Inventory() {
           <div className="bg-white rounded-xl w-full max-w-md shadow-2xl max-h-[90vh] flex flex-col">
             <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl">
               <h3 className="font-bold text-maroon text-lg">{editProductId ? "Edit Product" : "Add New Product"}</h3>
-              <button onClick={() => { setShowAddModal(false); setEditProductId(null); setAddForm({ ...EMPTY_PRODUCT }); }}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+              <button onClick={() => { setShowAddModal(false); setEditProductId(null); setAddForm({ ...EMPTY_PRODUCT }); setVariantDrafts([]); setVariantLoading(false); }}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
             </div>
             <form onSubmit={handleAddProduct} className="p-5 space-y-3 overflow-y-auto flex-1">
               {/* Product Image */}
@@ -379,7 +447,11 @@ export default function Inventory() {
               </div>
               <div>
                 <label className="text-xs font-semibold text-gray-600 uppercase">Unit</label>
-                <select value={addForm.unit} onChange={e => setAddForm(p => ({ ...p, unit: e.target.value }))}
+                <select value={addForm.unit} onChange={e => {
+                  const nextUnit = e.target.value;
+                  setAddForm(p => ({ ...p, unit: nextUnit }));
+                  if (nextUnit === "pc") setVariantDrafts([]);
+                }}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
                   <option value="gm">gm</option>
                   <option value="kg">kg</option>
