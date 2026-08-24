@@ -20,3 +20,13 @@ ALTER TABLE public.orders
   ADD COLUMN IF NOT EXISTS payment_reference text,
   ADD COLUMN IF NOT EXISTS gateway_order_id text,
   ADD COLUMN IF NOT EXISTS gateway_signature text;
+
+-- 4. Store inventory quantities with decimal precision for kg/gm products
+ALTER TABLE IF EXISTS public.products
+  ALTER COLUMN current_stock_qty TYPE numeric USING current_stock_qty::numeric,
+  ALTER COLUMN safety_low_threshold TYPE numeric USING safety_low_threshold::numeric,
+  ALTER COLUMN price TYPE numeric USING price::numeric,
+  ALTER COLUMN unit_purchase_cost TYPE numeric USING unit_purchase_cost::numeric;
+
+ALTER TABLE IF EXISTS public.inventory_log
+  ALTER COLUMN qty TYPE numeric USING qty::numeric;

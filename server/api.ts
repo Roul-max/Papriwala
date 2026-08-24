@@ -25,6 +25,28 @@ function sanitize(val: any): string {
   return val.replace(/[<>"'`;]/g, "").trim().slice(0, 500);
 }
 
+const DECIMAL_UNITS = new Set(["gm", "kg", "g", "gram", "grams", "ltr", "l", "liter", "litre"]);
+
+function normalizeUnit(unit: any): string {
+  return sanitize(unit || "pcs").toLowerCase() || "pcs";
+}
+
+function isDecimalQuantityUnit(unit: any): boolean {
+  return DECIMAL_UNITS.has(normalizeUnit(unit));
+}
+
+function roundMoney(value: any): number {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return 0;
+  return Number(amount.toFixed(2));
+}
+
+function roundQuantity(value: any, unit: any): number {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return 0;
+  return isDecimalQuantityUnit(unit) ? Number(amount.toFixed(3)) : Math.round(amount);
+}
+
 function isBcryptHash(value: unknown): value is string {
   return typeof value === "string" && /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(value);
 }
@@ -423,18 +445,19 @@ router.post("/products", async (req, res) => {
   const session = (req as any).session;
   const { name, category, price, sku, unit, current_stock_qty, unit_purchase_cost, safety_low_threshold, image, description, variants } = req.body;
   if (!name || !category) return res.status(400).json({ error: "name and category are required" });
+  const normalizedUnit = normalizeUnit(unit || "pcs");
   const newProduct = {
     id: `PRD-${Date.now()}`,
     name: sanitize(name),
     category: sanitize(category),
-    price: Number(price) || 0,
+    price: roundMoney(price),
     sku: sanitize(sku || ""),
-    unit: sanitize(unit || "pcs"),
+    unit: normalizedUnit,
     image: sanitize(image || ""),
     description: sanitize(description || ""),
-    unit_purchase_cost: Number(unit_purchase_cost) || 0,
-    safety_low_threshold: Number(safety_low_threshold) || 5,
-    current_stock_qty: Number(current_stock_qty) || 0,
+    unit_purchase_cost: roundMoney(unit_purchase_cost),
+    safety_low_threshold: roundQuantity(safety_low_threshold, normalizedUnit) || 5,
+    current_stock_qty: roundQuantity(current_stock_qty, normalizedUnit),
   };
   const saved = await dbInsert("products", newProduct, db.products);
   await dbInsert("inventory_log", {
@@ -447,7 +470,7 @@ router.post("/products", async (req, res) => {
     operator: session?.name || "Admin",
     timestamp: new Date().toISOString(),
   }, db.inventory_log);
-  await syncProductVariants(saved.id, unit === "pcs" ? [] : variants, Number(saved.price) || Number(newProduct.price) || 0);
+  await syncProductVariants(saved.id, normalizedUnit === "pcs" ? [] : variants, Number(saved.price) || Number(newProduct.price) || 0);
   res.json(saved);
 });
 
@@ -460,11 +483,20 @@ router.delete("/products/:id", async (req, res) => {
 });
 
 router.patch("/products/:id", async (req, res) => {
-  const updated = await dbUpdate("products", req.params.id, req.body);
+  const existing = db.products.find((p: any) => p.id === req.params.id);
+  const effectiveUnit = normalizeUnit(req.body.unit ?? existing?.unit ?? "pcs");
+  const patch = {
+    ...req.body,
+    ...(req.body.price !== undefined ? { price: roundMoney(req.body.price) } : {}),
+    ...(req.body.unit_purchase_cost !== undefined ? { unit_purchase_cost: roundMoney(req.body.unit_purchase_cost) } : {}),
+    ...(req.body.current_stock_qty !== undefined ? { current_stock_qty: roundQuantity(req.body.current_stock_qty, effectiveUnit) } : {}),
+    ...(req.body.safety_low_threshold !== undefined ? { safety_low_threshold: roundQuantity(req.body.safety_low_threshold, effectiveUnit) } : {}),
+    ...(req.body.unit !== undefined ? { unit: effectiveUnit } : {}),
+  };
+  const updated = await dbUpdate("products", req.params.id, patch);
   const local = db.products.find((p: any) => p.id === req.params.id);
-  if (local) Object.assign(local, req.body);
+  if (local) Object.assign(local, patch);
   if (Object.prototype.hasOwnProperty.call(req.body, "variants") || Object.prototype.hasOwnProperty.call(req.body, "unit")) {
-    const effectiveUnit = req.body.unit ?? updated?.unit ?? local?.unit ?? "pcs";
     await syncProductVariants(
       req.params.id,
       effectiveUnit === "pcs" ? [] : req.body.variants,
@@ -482,12 +514,13 @@ router.post("/products/:id/stock", async (req, res) => {
   if (!product) return res.status(404).json({ error: "Not found" });
 
   const { type, qty, reason } = req.body;
-  const amount = Number(qty);
+  const amount = roundQuantity(qty, product.unit);
+  const nextQty = roundQuantity(product.current_stock_qty + (type === "in" ? amount : -amount), product.unit);
 
-  if (type === "out" && product.current_stock_qty - amount < 0)
+  if (type === "out" && nextQty < 0)
     return res.status(400).json({ error: "Stock cannot go below zero" });
 
-  const newQty = product.current_stock_qty + (type === "in" ? amount : -amount);
+  const newQty = Math.max(0, nextQty);
   await dbUpdate("products", product.id, { current_stock_qty: newQty });
 
   const local = db.products.find((p: any) => p.id === product.id);
@@ -557,9 +590,9 @@ async function validateOrderStock(items: any[], isVoid: boolean): Promise<{ prod
   const insufficientItems: string[] = [];
 
   for (const item of (isVoid ? [] : items || [])) {
-    const qty = Number(item.qty);
-    if (!qty || qty <= 0) continue;
     const product = findOrderProduct(products, item);
+    const qty = roundQuantity(item.qty, product?.unit);
+    if (!qty || qty <= 0) continue;
     if (!product) continue;
     if (product.current_stock_qty < qty) {
       insufficientItems.push(`${product.name} (available: ${product.current_stock_qty}, requested: ${qty})`);
@@ -576,7 +609,7 @@ function getVariantForItem(productVariants: any[], item: any) {
 }
 
 function computeTrustedItemTotal(product: any, item: any, productVariants: any[] = []): number {
-  const qty = Number(item?.qty || 0);
+  const qty = roundQuantity(item?.qty || 0, product?.unit);
   if (!qty || qty <= 0) return 0;
 
   const variant = getVariantForItem(productVariants, item);
@@ -671,7 +704,7 @@ async function persistOrder(reqBody: any, session?: any) {
   const saved = await dbInsert("orders", newOrder, db.orders);
 
   for (const item of (isVoid ? [] : (saved.items || []))) {
-    const qty = Number(item.qty);
+    const qty = roundQuantity(item.qty, findOrderProduct(products, item)?.unit);
     if (!qty || qty <= 0) continue;
 
     const product = findOrderProduct(products, item);
@@ -687,13 +720,13 @@ async function persistOrder(reqBody: any, session?: any) {
       if (error) {
         const fresh = await supabase.from("products").select("current_stock_qty").eq("id", product.id).single();
         const currentQty = Number(fresh.data?.current_stock_qty ?? product.current_stock_qty);
-        newQty = Math.max(0, currentQty - qty);
+        newQty = roundQuantity(Math.max(0, currentQty - qty), product.unit);
         await supabase.from("products").update({ current_stock_qty: newQty }).eq("id", product.id);
       } else {
-        newQty = Number(data) ?? Math.max(0, product.current_stock_qty - qty);
+        newQty = roundQuantity(Number(data) ?? Math.max(0, product.current_stock_qty - qty), product.unit);
       }
     } else {
-      newQty = Math.max(0, Number(product.current_stock_qty) - qty);
+      newQty = roundQuantity(Math.max(0, Number(product.current_stock_qty) - qty), product.unit);
       await dbUpdate("products", product.id, { current_stock_qty: newQty });
     }
 

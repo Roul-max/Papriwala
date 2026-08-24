@@ -5,6 +5,16 @@ import { useAccess } from "../../hooks/useAccess";
 
 const EMPTY_CAT = { name: "", image: "" };
 const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs", image: "" };
+const DECIMAL_UNITS = new Set(["gm", "kg", "g", "gram", "grams", "ltr", "l", "liter", "litre"]);
+
+const normalizeUnit = (unit?: string) => (unit || "pcs").toLowerCase();
+const isDecimalQuantityUnit = (unit?: string) => DECIMAL_UNITS.has(normalizeUnit(unit));
+const quantityStep = (unit?: string) => (isDecimalQuantityUnit(unit) ? "0.001" : "1");
+const normalizeQuantityInput = (value: string, unit?: string) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "";
+  return isDecimalQuantityUnit(unit) ? Number(parsed.toFixed(3)).toString() : String(Math.round(parsed));
+};
 
 export default function AdminCategories() {
   const [categories, setCategories] = useState<any[]>([]);
@@ -77,10 +87,12 @@ export default function AdminCategories() {
     e.preventDefault();
     setProductError("");
     if (!productForm.name || !productForm.sku || !productForm.price) { setProductError("Name, SKU and price are required."); return; }
+    const currentStockQty = Number(normalizeQuantityInput(productForm.current_stock_qty, productForm.unit)) || 0;
+    const safetyLowThreshold = Number(normalizeQuantityInput(productForm.safety_low_threshold, productForm.unit)) || 0;
     await apiFetch("/api/products", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...productForm, unit_purchase_cost: Number(productForm.unit_purchase_cost), price: Number(productForm.price), current_stock_qty: Number(productForm.current_stock_qty), safety_low_threshold: Number(productForm.safety_low_threshold) }),
+      body: JSON.stringify({ ...productForm, unit_purchase_cost: Number(Number(productForm.unit_purchase_cost).toFixed(2)), price: Number(Number(productForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold }),
     });
     setProductModal(null);
     setProductForm({ ...EMPTY_PRODUCT });
@@ -104,10 +116,12 @@ export default function AdminCategories() {
     e.preventDefault();
     setEditProductError("");
     if (!editProductForm.name || !editProductForm.price) { setEditProductError("Name and price are required."); return; }
+    const currentStockQty = Number(normalizeQuantityInput(editProductForm.current_stock_qty, editProductForm.unit)) || 0;
+    const safetyLowThreshold = Number(normalizeQuantityInput(editProductForm.safety_low_threshold, editProductForm.unit)) || 0;
     await apiFetch(`/api/products/${editProductModal!.product.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...editProductForm, unit_purchase_cost: Number(editProductForm.unit_purchase_cost), price: Number(editProductForm.price), current_stock_qty: Number(editProductForm.current_stock_qty), safety_low_threshold: Number(editProductForm.safety_low_threshold) }),
+      body: JSON.stringify({ ...editProductForm, unit_purchase_cost: Number(Number(editProductForm.unit_purchase_cost).toFixed(2)), price: Number(Number(editProductForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold }),
     });
     setEditProductModal(null);
     showToast("Product updated.");
@@ -280,6 +294,8 @@ export default function AdminCategories() {
                   <label className="text-xs font-semibold text-gray-600 uppercase">{f.label}</label>
                   <input type={f.type} value={(productForm as any)[f.key]}
                     onChange={e => setProductForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                    step={(f.key === "current_stock_qty" || f.key === "safety_low_threshold") ? quantityStep(productForm.unit) : undefined}
+                    inputMode={(f.key === "current_stock_qty" || f.key === "safety_low_threshold") && isDecimalQuantityUnit(productForm.unit) ? "decimal" : undefined}
                     className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
                 </div>
               ))}
@@ -334,6 +350,8 @@ export default function AdminCategories() {
                   <label className="text-xs font-semibold text-gray-600 uppercase">{f.label}</label>
                   <input type={f.type} value={(editProductForm as any)[f.key]}
                     onChange={e => setEditProductForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                    step={(f.key === "current_stock_qty" || f.key === "safety_low_threshold") ? quantityStep(editProductForm.unit) : undefined}
+                    inputMode={(f.key === "current_stock_qty" || f.key === "safety_low_threshold") && isDecimalQuantityUnit(editProductForm.unit) ? "decimal" : undefined}
                     className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
                 </div>
               ))}

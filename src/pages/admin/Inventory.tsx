@@ -7,6 +7,28 @@ type LogEntry = { id: string; type: "STOCK_IN" | "STOCK_OUT"; product_name: stri
 type VariantDraft = { id: string; size_label: string; price: string };
 
 const EMPTY_PRODUCT = { name: "", sku: "", category: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "gm", image: "", description: "" };
+const DECIMAL_UNITS = new Set(["gm", "kg", "g", "gram", "grams", "ltr", "l", "liter", "litre"]);
+
+const normalizeUnit = (unit?: string) => (unit || "pcs").toLowerCase();
+const isDecimalQuantityUnit = (unit?: string) => DECIMAL_UNITS.has(normalizeUnit(unit));
+const quantityStep = (unit?: string) => (isDecimalQuantityUnit(unit) ? "0.001" : "1");
+const formatQuantityValue = (value: number, unit?: string) => {
+  if (!Number.isFinite(value)) return "0";
+  return isDecimalQuantityUnit(unit) ? Number(value.toFixed(3)).toString() : String(Math.round(value));
+};
+const getProductStockValue = (product: Product) => {
+  const unit = normalizeUnit(product.unit);
+  const qty = Number(product.current_stock_qty || 0);
+  const rate = Number(product.unit_purchase_cost || product.price || 0);
+  if (!Number.isFinite(qty) || !Number.isFinite(rate)) return 0;
+  if (unit === "gm") return rate * (qty / 1000);
+  return rate * qty;
+};
+const normalizeQuantityInput = (value: string, unit?: string) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "";
+  return isDecimalQuantityUnit(unit) ? Number(parsed.toFixed(3)).toString() : String(Math.round(parsed));
+};
 
 export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -129,7 +151,7 @@ export default function Inventory() {
 
   const metrics = [
     { label: "Total Products", value: products.length, icon: Package, color: "text-blue-500" },
-    { label: "Total Stock Value", value: `₹${products.reduce((s, p) => s + p.unit_purchase_cost * p.current_stock_qty, 0).toFixed(0)}`, icon: Package, color: "text-green-500" },
+    { label: "Total Stock Value", value: `₹${products.reduce((s, p) => s + getProductStockValue(p), 0).toFixed(2)}`, icon: Package, color: "text-green-500" },
     { label: "Low Stock Items", value: products.filter(p => p.current_stock_qty > 0 && p.current_stock_qty <= p.safety_low_threshold).length, icon: AlertTriangle, color: "text-yellow-500" },
     { label: "Out of Stock", value: products.filter(p => p.current_stock_qty === 0).length, icon: XCircle, color: "text-red-500" },
   ];
@@ -160,17 +182,19 @@ export default function Inventory() {
       return;
     }
     const sku = addForm.sku || nextSku();
+    const currentStockQty = Number(normalizeQuantityInput(addForm.current_stock_qty, addForm.unit)) || 0;
+    const safetyLowThreshold = Number(normalizeQuantityInput(addForm.safety_low_threshold, addForm.unit)) || 0;
     if (editProductId) {
       await apiFetch(`/api/products/${editProductId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...addForm, sku, price: Number(addForm.price), current_stock_qty: Number(addForm.current_stock_qty) || 0, safety_low_threshold: Number(addForm.safety_low_threshold) })
+        body: JSON.stringify({ ...addForm, sku, price: Number(Number(addForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold })
       });
     } else {
       await apiFetch("/api/products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...addForm, sku, price: Number(addForm.price), current_stock_qty: Number(addForm.current_stock_qty) || 0, safety_low_threshold: Number(addForm.safety_low_threshold) })
+        body: JSON.stringify({ ...addForm, sku, price: Number(Number(addForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold })
       });
     }
     setShowAddModal(false);
@@ -202,7 +226,7 @@ export default function Inventory() {
     e.preventDefault();
     setStockError("");
     if (!stockModal) return;
-    const qty = Number(stockQty);
+    const qty = Number(normalizeQuantityInput(stockQty, stockModal.product.unit));
     if (!qty || qty <= 0) { setStockError("Enter a valid quantity."); return; }
     if (stockModal.type === "out" && stockModal.product.current_stock_qty - qty < 0) {
       setStockError("Stock cannot go below zero."); return;
@@ -303,8 +327,8 @@ export default function Inventory() {
                   <td className="py-3 px-4 font-mono text-xs">{p.sku}</td>
                   <td className="py-3 px-4 font-bold">
                     {p.unit === "gm" && p.current_stock_qty >= 1000
-                      ? <>{(p.current_stock_qty / 1000).toFixed(2)} <span className="text-xs text-gray-400 font-normal">kg</span></>
-                      : <>{p.current_stock_qty} <span className="text-xs text-gray-400 font-normal">{p.unit || "pcs"}</span></>}
+                      ? <>{formatQuantityValue(p.current_stock_qty / 1000, "kg")} <span className="text-xs text-gray-400 font-normal">kg</span></>
+                      : <>{formatQuantityValue(p.current_stock_qty, p.unit)} <span className="text-xs text-gray-400 font-normal">{p.unit || "pcs"}</span></>}
                   </td>
                   <td className="py-3 px-4">
                     <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${p.current_stock_qty === 0 ? "bg-red-100 text-red-700" : p.current_stock_qty <= p.safety_low_threshold ? "bg-yellow-100 text-yellow-700" : "bg-green-100 text-green-700"}`}>
@@ -445,11 +469,16 @@ export default function Inventory() {
                   {categories.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-600 uppercase">Unit</label>
-                <select value={addForm.unit} onChange={e => {
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">Unit</label>
+                  <select value={addForm.unit} onChange={e => {
                   const nextUnit = e.target.value;
-                  setAddForm(p => ({ ...p, unit: nextUnit }));
+                  setAddForm(p => ({
+                    ...p,
+                    unit: nextUnit,
+                    current_stock_qty: normalizeQuantityInput(p.current_stock_qty, nextUnit),
+                    safety_low_threshold: normalizeQuantityInput(p.safety_low_threshold, nextUnit),
+                  }));
                   if (nextUnit === "pc") setVariantDrafts([]);
                 }}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon bg-white">
@@ -465,12 +494,12 @@ export default function Inventory() {
               </div>
               <div>
                 <label className="text-xs font-semibold text-gray-600 uppercase">Initial Quantity ({addForm.unit}) <span className="text-gray-400 font-normal">(optional)</span></label>
-                <input type="number" min="0" value={addForm.current_stock_qty} onChange={e => setAddForm(p => ({ ...p, current_stock_qty: e.target.value }))}
+                <input type="number" min="0" step={quantityStep(addForm.unit)} inputMode={isDecimalQuantityUnit(addForm.unit) ? "decimal" : "numeric"} value={addForm.current_stock_qty} onChange={e => setAddForm(p => ({ ...p, current_stock_qty: e.target.value }))}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
               </div>
               <div>
                 <label className="text-xs font-semibold text-gray-600 uppercase">Safety Low Threshold ({addForm.unit})</label>
-                <input type="number" min="0" value={addForm.safety_low_threshold} onChange={e => setAddForm(p => ({ ...p, safety_low_threshold: e.target.value }))}
+                <input type="number" min="0" step={quantityStep(addForm.unit)} inputMode={isDecimalQuantityUnit(addForm.unit) ? "decimal" : "numeric"} value={addForm.safety_low_threshold} onChange={e => setAddForm(p => ({ ...p, safety_low_threshold: e.target.value }))}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
               </div>
               <div>
@@ -524,10 +553,10 @@ export default function Inventory() {
               <button onClick={() => setStockModal(null)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
             </div>
             <form onSubmit={handleStockAdjust} className="p-5 space-y-4">
-              <p className="text-sm text-gray-500">Current stock: <strong>{stockModal.product.current_stock_qty}</strong></p>
+              <p className="text-sm text-gray-500">Current stock: <strong>{formatQuantityValue(stockModal.product.current_stock_qty, stockModal.product.unit)}</strong></p>
               <div>
                 <label className="text-xs font-semibold text-gray-600 uppercase">Quantity</label>
-                <input type="number" min="1" required value={stockQty} onChange={e => setStockQty(e.target.value)}
+                <input type="number" min={isDecimalQuantityUnit(stockModal.product.unit) ? "0.001" : "1"} step={quantityStep(stockModal.product.unit)} inputMode={isDecimalQuantityUnit(stockModal.product.unit) ? "decimal" : "numeric"} required value={stockQty} onChange={e => setStockQty(e.target.value)}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon" />
               </div>
               <div>
