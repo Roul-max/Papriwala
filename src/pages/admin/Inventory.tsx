@@ -21,7 +21,7 @@ const getProductStockValue = (product: Product) => {
   const qty = Number(product.current_stock_qty || 0);
   const rate = Number(product.unit_purchase_cost || product.price || 0);
   if (!Number.isFinite(qty) || !Number.isFinite(rate)) return 0;
-  if (unit === "gm") return rate * (qty / 1000);
+  if (unit === "gm") return rate * qty;
   return rate * qty;
 };
 const normalizeQuantityInput = (value: string, unit?: string) => {
