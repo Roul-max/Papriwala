@@ -32,6 +32,7 @@ interface Order {
 
 type Tab = "orders" | "deleted";
 type FilterMode = "all" | "month" | "custom";
+type SalesPeriod = "day" | "week" | "month";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,35 @@ function paymentLabel(order: Order): string {
   if (raw === "card") return "Credit / Debit Card";
   if (raw === "cash") return "Counter Cash";
   return raw;
+}
+
+function shiftBusinessDate(dateString: string, days: number): string {
+  const date = new Date(`${dateString}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function getSalesPeriodRange(period: SalesPeriod): { start: string; end: string } {
+  const today = toBusinessDateString(new Date());
+  if (!today) return { start: "", end: "" };
+
+  if (period === "day") {
+    return { start: today, end: today };
+  }
+
+  if (period === "week") {
+    const current = new Date(`${today}T00:00:00Z`);
+    const day = current.getUTCDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    const start = shiftBusinessDate(today, mondayOffset);
+    return { start, end: shiftBusinessDate(start, 6) };
+  }
+
+  const start = `${today.slice(0, 7)}-01`;
+  const nextMonth = new Date(`${start}T00:00:00Z`);
+  nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+  nextMonth.setUTCDate(0);
+  return { start, end: nextMonth.toISOString().slice(0, 10) };
 }
 
 function printOrder(order: Order) {
@@ -119,6 +149,7 @@ export default function AdminOrders() {
   const [filterMonth, setFilterMonth] = useState(getCurrentBusinessMonthString());
   const [filterFrom,  setFilterFrom]  = useState("");
   const [filterTo,    setFilterTo]    = useState("");
+  const [salesPeriod, setSalesPeriod] = useState<SalesPeriod>("day");
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const access     = useAccess("Orders");
@@ -185,6 +216,39 @@ export default function AdminOrders() {
       return true;
     })
     .sort((a, b) => (b.timestamp ? new Date(b.timestamp).getTime() : 0) - (a.timestamp ? new Date(a.timestamp).getTime() : 0));
+
+  const salesPeriodRange = getSalesPeriodRange(salesPeriod);
+  const soldProductMap = new Map<string, { key: string; name: string; size: string; unit: string; qty: number }>();
+
+  orders
+    .filter(order => {
+      if (order.order_status === "In-Preparation") return false;
+      const orderDate = toBusinessDateString(order.timestamp || (order as any).created_at);
+      if (!orderDate) return false;
+      return isWithinBusinessDateRange(order.timestamp || (order as any).created_at, salesPeriodRange.start, salesPeriodRange.end);
+    })
+    .forEach(order => {
+      (order.items || []).forEach(item => {
+        const key = `${item.name}__${item.size || ""}__${item.unit || ""}`;
+        const existing = soldProductMap.get(key);
+        const qty = Number(item.qty || 0);
+        if (existing) {
+          existing.qty += qty;
+          return;
+        }
+        soldProductMap.set(key, {
+          key,
+          name: item.name,
+          size: item.size || "",
+          unit: item.unit || "",
+          qty,
+        });
+      });
+    });
+
+  const soldProductRows = Array.from(soldProductMap.values())
+    .filter(item => item.qty > 0)
+    .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
 
   const totalPrepared = filteredOrders.filter(o => ["Ready to Serve", "Paid"].includes(o.order_status)).length;
 
@@ -394,6 +458,63 @@ export default function AdminOrders() {
             )}
           </div>
         ))}
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-100 shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3 bg-gray-50">
+          <div>
+            <h3 className="font-bold text-gray-800">Products Sold</h3>
+            <p className="text-xs text-gray-500">Shows product quantities sold for the selected period.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-gray-500 uppercase">Filter:</span>
+            {(["day", "week", "month"] as SalesPeriod[]).map(period => (
+              <button
+                key={period}
+                onClick={() => setSalesPeriod(period)}
+                className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors ${
+                  salesPeriod === period ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {period === "day" ? "Day" : period === "week" ? "Week" : "Month"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-4 py-3 text-xs text-gray-500 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
+          <span>
+            Range: {salesPeriodRange.start || "—"} to {salesPeriodRange.end || "—"}
+          </span>
+          <span>{soldProductRows.length} product(s)</span>
+        </div>
+
+        {soldProductRows.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">No product sales found for this period.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                <tr>
+                  <th className="text-left font-semibold px-4 py-3">Product</th>
+                  <th className="text-center font-semibold px-4 py-3">Quantity Sold</th>
+                  <th className="text-right font-semibold px-4 py-3">Variant</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {soldProductRows.map((row, index) => (
+                  <tr key={row.key} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
+                    <td className="px-4 py-3 font-medium text-gray-800">{row.name}</td>
+                    <td className="px-4 py-3 text-center font-bold text-maroon">{row.qty}</td>
+                    <td className="px-4 py-3 text-right text-gray-600">
+                      {row.size || row.unit ? [row.size, row.unit].filter(Boolean).join(" · ") : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
       </>)}
 
