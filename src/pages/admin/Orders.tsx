@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { ChevronDown, ChevronUp, Check, Clock, MessageCircle, EyeOff, Filter, Printer, Trash2, X } from "lucide-react";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
-import { getCurrentBusinessMonthString, isWithinBusinessDateRange, toBusinessDateString, toBusinessMonthString } from "../../lib/businessTime";
+import { getCurrentBusinessDateString, getCurrentBusinessMonthString, isWithinBusinessDateRange, toBusinessDateString, toBusinessMonthString } from "../../lib/businessTime";
 import { usePrinter } from "../../hooks/usePrinter";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -22,16 +22,21 @@ interface Order {
   order_source: string;
   table_id?: string;
   payment_mode?: string;
+  payment_method?: string;
   created_by?: string;
   customer_phone?: string;
   items: OrderItem[];
   grand_total: number;
   tax_collected?: number;
   discount_applied?: number;
+  extraneous_charges?: number;
+  other_charges_desc?: string;
+  created_at?: string;
+  order_timestamp?: string;
 }
 
 type Tab = "orders" | "deleted";
-type FilterMode = "all" | "month" | "custom";
+type FilterMode = "today" | "month" | "custom";
 type SalesPeriod = "day" | "week" | "month";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -49,6 +54,19 @@ function paymentLabel(order: Order): string {
   if (raw === "card") return "Credit / Debit Card";
   if (raw === "cash") return "Counter Cash";
   return raw;
+}
+
+function orderDateTime(order: Order): string {
+  const ts = order.timestamp || order.order_timestamp || order.created_at || "";
+  return ts ? new Date(ts).toLocaleString() : "—";
+}
+
+function orderTotalQty(order: Order): number {
+  return (order.items || []).reduce((sum, item) => sum + Number(item.qty || 0), 0);
+}
+
+function orderSubtotal(order: Order): number {
+  return (order.items || []).reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 0), 0);
 }
 
 function shiftBusinessDate(dateString: string, days: number): string {
@@ -91,10 +109,6 @@ function printOrder(order: Order) {
     </div>`
   ).join("");
 
-  const discountRow = Number(order.discount_applied) > 0
-    ? `<div style="display:flex;justify-content:space-between;font-size:10px"><span>Discount</span><span>-₹${Number(order.discount_applied).toFixed(2)}</span></div>`
-    : "";
-
   const html = `<html><head><style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Courier New',monospace;font-size:11px;width:300px;margin:0 auto;padding:10px 6px}
@@ -110,7 +124,6 @@ function printOrder(order: Order) {
     ${dash}
     ${itemsHtml}
     ${dash}
-    ${discountRow}
     <div style="display:flex;justify-content:space-between;font-size:10px"><span>Tax (GST)</span><span>₹${Number(order.tax_collected || 0).toFixed(2)}</span></div>
     ${dash}
     <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:bold"><span>Grand Total</span><span>₹${Number(order.grand_total).toFixed(2)}</span></div>
@@ -145,7 +158,7 @@ export default function AdminOrders() {
   const [deletedBills, setDeletedBills] = useState<any[]>([]);
   const [expanded,    setExpanded]    = useState<string | null>(null);
   const [analytics,   setAnalytics]   = useState({ totalRevenue: 0, totalOrders: 0 });
-  const [filterMode,  setFilterMode]  = useState<FilterMode>("all");
+  const [filterMode,  setFilterMode]  = useState<FilterMode>("today");
   const [filterMonth, setFilterMonth] = useState(getCurrentBusinessMonthString());
   const [filterFrom,  setFilterFrom]  = useState("");
   const [filterTo,    setFilterTo]    = useState("");
@@ -207,13 +220,13 @@ export default function AdminOrders() {
   const filteredOrders = orders
     .filter(o => {
       if (o.order_status === "In-Preparation") return false;
-      const orderDate = toBusinessDateString(o.timestamp || (o as any).created_at);
-      if (!orderDate) return filterMode === "all";
-      if (filterMode === "month")  return toBusinessMonthString(o.timestamp || (o as any).created_at) === filterMonth;
-      if (filterMode === "custom" && filterFrom && filterTo) {
-        return isWithinBusinessDateRange(o.timestamp || (o as any).created_at, filterFrom, filterTo);
-      }
-      return true;
+      const sourceDate = o.timestamp || (o as any).order_timestamp || (o as any).created_at;
+      const orderDate = toBusinessDateString(sourceDate);
+      if (!orderDate) return false;
+      if (filterMode === "today") return orderDate === getCurrentBusinessDateString();
+      if (filterMode === "month")  return toBusinessMonthString(sourceDate) === filterMonth;
+      if (filterMode === "custom") return Boolean(filterFrom && filterTo) && isWithinBusinessDateRange(sourceDate, filterFrom, filterTo);
+      return false;
     })
     .sort((a, b) => (b.timestamp ? new Date(b.timestamp).getTime() : 0) - (a.timestamp ? new Date(a.timestamp).getTime() : 0));
 
@@ -322,10 +335,10 @@ export default function AdminOrders() {
       <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-3 flex flex-wrap items-center gap-3">
         <Filter size={15} className="text-gray-400" />
         <span className="text-xs font-semibold text-gray-500 uppercase">Filter:</span>
-        {(["all", "month", "custom"] as FilterMode[]).map(m => (
+        {(["today", "month", "custom"] as FilterMode[]).map(m => (
           <button key={m} onClick={() => setFilterMode(m)}
             className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors ${filterMode === m ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
-            {m === "all" ? "All Orders" : m === "month" ? "By Month" : "Custom Range"}
+            {m === "today" ? "Today" : m === "month" ? "By Month" : "Custom Range"}
           </button>
         ))}
         {filterMode === "month" && (
@@ -402,51 +415,116 @@ export default function AdminOrders() {
 
             {/* Expanded detail */}
             {expanded === order.id && (
-              <div className="p-4 bg-white grid grid-cols-2 gap-6">
-                <div>
-                  <h4 className="font-bold text-gray-800 mb-3 border-b pb-2">Line Items</h4>
-                  <div className="space-y-3">
-                    {order.items?.length > 0 ? order.items.map((item, idx) => (
-                      <div key={idx} className="flex justify-between text-sm">
-                        <div>
-                          <span className="font-semibold">{item.name} {item.size ? `(${item.size})` : ""}</span>
-                          {item.unit && <span className="text-gray-400 text-xs ml-1">{item.unit}</span>}
-                          {item.qty > 1 && <span className="text-gray-400 text-xs ml-1">x{item.qty}</span>}
-                        </div>
-                        <span>₹{(item.price * item.qty).toFixed(2)}</span>
-                      </div>
-                    )) : <p className="text-gray-400 text-sm italic">No item details.</p>}
+              <div className="p-4 bg-white grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div className="bg-gray-50 border border-gray-100 rounded p-4">
+                    <div className="text-center">
+                      <div className="font-serif text-xl font-bold text-gray-900">Shri Badrinarayan Papriwale</div>
+                      <div className="text-xs text-gray-500">Sweets | Namkeen | Bakery</div>
+                      <div className="text-xs text-gray-500">Main Road, Buxar, Bihar</div>
+                    </div>
+                    <div className="border-t border-dashed border-gray-200 my-3" />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-600">
+                      <div><span className="font-semibold text-gray-700">Bill No:</span> #{order.id}</div>
+                      <div><span className="font-semibold text-gray-700">Date & Time:</span> {orderDateTime(order)}</div>
+                      <div><span className="font-semibold text-gray-700">Source:</span> {order.order_source || "—"}</div>
+                      <div><span className="font-semibold text-gray-700">Payment:</span> {paymentLabel(order)}</div>
+                      <div><span className="font-semibold text-gray-700">Status:</span> {order.order_status || "—"}</div>
+                      <div><span className="font-semibold text-gray-700">Table:</span> {order.table_id || "Delivery"}</div>
+                      <div><span className="font-semibold text-gray-700">Cashier:</span> {order.created_by || "—"}</div>
+                      <div><span className="font-semibold text-gray-700">Customer:</span> {order.customer_phone ? `+91 ${order.customer_phone}` : "—"}</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-gray-100 rounded overflow-hidden">
+                    <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
+                      <h4 className="font-bold text-gray-800">Item Details</h4>
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                      {order.items?.length > 0 ? order.items.map((item, idx) => {
+                        const lineTotal = Number(item.price || 0) * Number(item.qty || 0);
+                        return (
+                          <div key={idx} className="px-4 py-3 text-sm">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-gray-800">
+                                  {item.name} {item.size ? `(${item.size})` : ""}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Qty: {item.qty} {item.unit || "pcs"} {item.unit === "gm" ? "(weight based)" : ""}
+                                </p>
+                              </div>
+                              <div className="text-right shrink-0 text-xs text-gray-600">
+                                <p>Rate: ₹{Number(item.price || 0).toFixed(2)}</p>
+                                <p className="font-semibold text-gray-800 mt-1">Amount: ₹{lineTotal.toFixed(2)}</p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }) : <div className="px-4 py-6 text-gray-400 text-sm italic">No item details.</div>}
+                    </div>
                   </div>
                 </div>
 
-                <div className="bg-gray-50 p-4 rounded border border-gray-100">
-                  <h4 className="font-bold text-gray-800 mb-3 border-b pb-2">Summary</h4>
-                  <div className="space-y-2 text-sm mb-4">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Base</span>
-                      <span>₹{(Number(order.grand_total) - Number(order.tax_collected || 0)).toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">GST</span>
-                      <span>₹{Number(order.tax_collected || 0).toFixed(2)}</span>
-                    </div>
-                    {Number(order.discount_applied) > 0 && (
-                      <div className="flex justify-between text-green-600">
-                        <span>Discount</span>
-                        <span>-₹{Number(order.discount_applied).toFixed(2)}</span>
+                <div className="space-y-4">
+                  <div className="bg-gray-50 border border-gray-100 rounded p-4">
+                    <h4 className="font-bold text-gray-800 mb-3 border-b border-gray-200 pb-2">Receipt Summary</h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Total Quantity</span>
+                        <span className="font-semibold text-gray-800">{orderTotalQty(order)}</span>
                       </div>
-                    )}
-                    {order.created_by && (
-                      <div className="flex justify-between text-gray-500 text-xs border-t pt-2 mt-2">
-                        <span>Processed by</span>
-                        <span className="font-semibold">{order.created_by}</span>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Base Amount</span>
+                        <span>₹{orderSubtotal(order).toFixed(2)}</span>
                       </div>
-                    )}
-                    <div className="flex justify-between font-bold text-lg pt-2 border-t text-maroon">
-                      <span>Net Total</span>
-                      <span>₹{Number(order.grand_total).toFixed(2)}</span>
+                      {Number(order.discount_applied || 0) > 0 && (
+                        <div className="flex justify-between text-green-600">
+                          <span>Discount</span>
+                          <span>-₹{Number(order.discount_applied || 0).toFixed(2)}</span>
+                        </div>
+                      )}
+                      {Number(order.extraneous_charges || 0) > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Other Charges{order.other_charges_desc ? ` (${order.other_charges_desc})` : ""}</span>
+                          <span>₹{Number(order.extraneous_charges || 0).toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">GST</span>
+                        <span>₹{Number(order.tax_collected || 0).toFixed(2)}</span>
+                      </div>
+                      <div className="border-t border-gray-200 pt-2 mt-2 flex justify-between font-bold text-lg text-maroon">
+                        <span>Grand Total</span>
+                        <span>₹{Number(order.grand_total || 0).toFixed(2)}</span>
+                      </div>
                     </div>
                   </div>
+
+                  <div className="bg-white border border-gray-100 rounded p-4">
+                    <h4 className="font-bold text-gray-800 mb-3 border-b border-gray-200 pb-2">Additional Details</h4>
+                    <div className="space-y-2 text-sm">
+                      {order.created_by && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Processed By</span>
+                          <span className="font-semibold text-gray-800">{order.created_by}</span>
+                        </div>
+                      )}
+                      {order.customer_phone && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Customer Phone</span>
+                          <span className="font-semibold text-gray-800">+91 {order.customer_phone}</span>
+                        </div>
+                      )}
+                      {order.table_id && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Table ID</span>
+                          <span className="font-semibold text-gray-800">{order.table_id}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   {order.customer_phone && (
                     <a href={`https://wa.me/91${order.customer_phone}`} target="_blank" rel="noreferrer"
                       className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white font-semibold py-2 rounded shadow transition-colors flex items-center justify-center gap-2 text-sm">

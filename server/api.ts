@@ -579,10 +579,25 @@ async function readRazorpayError(response: Response): Promise<{ message: string;
 }
 
 function findOrderProduct(products: any[], item: any) {
-  return products.find((p: any) =>
-    (item.product_id && p.id === item.product_id) ||
-    p.name?.toLowerCase() === item.name?.toLowerCase()
-  );
+  const productId = String(item?.product_id || item?.productId || item?.id || "").trim();
+  if (productId) {
+    const byId = products.find((p: any) => String(p.id || "").trim() === productId);
+    if (byId) return byId;
+  }
+
+  const targetName = String(item?.name || "").trim().toLowerCase();
+  if (!targetName) return null;
+
+  const targetUnit = String(item?.unit || "").trim().toLowerCase();
+  const nameMatches = products.filter((p: any) => String(p.name || "").trim().toLowerCase() === targetName);
+
+  if (targetUnit) {
+    const unitMatch = nameMatches.find((p: any) => String(p.unit || "").trim().toLowerCase() === targetUnit);
+    if (unitMatch) return unitMatch;
+  }
+
+  if (nameMatches.length === 1) return nameMatches[0];
+  return null;
 }
 
 async function validateOrderStock(items: any[], isVoid: boolean): Promise<{ products: any[]; insufficientItems: string[] }> {
@@ -608,16 +623,36 @@ function getVariantForItem(productVariants: any[], item: any) {
   return productVariants.find((variant: any) => String(variant.size_label || "").trim().toLowerCase() === target) || null;
 }
 
+function estimateStoredItemTotal(item: any): number {
+  const qty = Number(item?.qty || 0);
+  if (!Number.isFinite(qty) || qty <= 0) return 0;
+
+  const rawLineTotal = Number(item?.line_total ?? item?.total ?? item?.amount);
+  if (Number.isFinite(rawLineTotal) && rawLineTotal > 0) {
+    return Number(rawLineTotal.toFixed(2));
+  }
+
+  const unitPrice = Number(item?.price);
+  if (Number.isFinite(unitPrice) && unitPrice > 0) {
+    return Number((unitPrice * qty).toFixed(2));
+  }
+
+  return 0;
+}
+
 function computeTrustedItemTotal(product: any, item: any, productVariants: any[] = []): number {
-  const qty = roundQuantity(item?.qty || 0, product?.unit);
+  const qty = roundQuantity(item?.qty || 0, product?.unit || item?.unit);
   if (!qty || qty <= 0) return 0;
+
+  const storedLineTotal = estimateStoredItemTotal(item);
+  if (storedLineTotal > 0) return storedLineTotal;
 
   const variant = getVariantForItem(productVariants, item);
   const variantMultiplier = Number(variant?.variant_price_modifier || 1) || 1;
   const basePrice = Number(product?.price || 0);
   const unitPrice = basePrice * variantMultiplier;
 
-  // Prices are stored per unit in the catalog, including gm-based items.
+  // Fallback only when the stored bill item does not contain a usable price.
   return Number((unitPrice * qty).toFixed(2));
 }
 
@@ -634,6 +669,95 @@ async function computeTrustedOrderTotal(items: any[]): Promise<{ total: number; 
   }
 
   return { total: Number(total.toFixed(2)), products, productVariants };
+}
+
+function estimateStoredBillTotal(items: any[]): number {
+  return Number((items || []).reduce((sum, item) => sum + estimateStoredItemTotal(item), 0).toFixed(2));
+}
+
+function normalizeBillGrandTotal(order: any): number {
+  const stored = Number(order?.grand_total || 0);
+  if (Number.isFinite(stored) && stored > 0) return Number(stored.toFixed(2));
+  return estimateStoredBillTotal(order?.items || []);
+}
+
+type BalanceType = "cash" | "account";
+
+function resolveBalanceType(paymentMethod?: any, paymentMode?: any): BalanceType | null {
+  const raw = String(paymentMethod || paymentMode || "").trim().toLowerCase();
+  if (!raw) return null;
+  if (raw.includes("cash")) return "cash";
+  if (["upi", "card", "online", "razorpay", "bank", "wallet"].some(token => raw.includes(token))) return "account";
+  return null;
+}
+
+async function adjustSettingsBalance(type: BalanceType, delta: number): Promise<void> {
+  if (!Number.isFinite(delta) || delta === 0) return;
+
+  const nextSettings = { ...db.settings };
+  if (type === "cash") {
+    nextSettings.cashBalance = Number(nextSettings.cashBalance || 0) + delta;
+  } else {
+    nextSettings.accountBalance = Number(nextSettings.accountBalance || 0) + delta;
+  }
+
+  db.settings = nextSettings;
+  if (supabase) {
+    await supabase.from("settings").upsert({ id: 1, value: db.settings });
+  }
+}
+
+async function applyOrderBalanceEffect(order: any, direction: 1 | -1): Promise<void> {
+  const balanceType = resolveBalanceType(order?.payment_method, order?.payment_mode);
+  const amount = Number(order?.grand_total || 0);
+  if (!balanceType || !Number.isFinite(amount) || amount <= 0) return;
+  await adjustSettingsBalance(balanceType, direction * amount);
+}
+
+async function restoreOrderStock(items: any[], products: any[], session: any, orderId: string): Promise<void> {
+  for (const item of items || []) {
+    const product = findOrderProduct(products, item);
+    if (!product) continue;
+
+    const qty = roundQuantity(item.qty, product.unit);
+    if (!qty || qty <= 0) continue;
+
+    let newQty: number;
+
+    if (supabase) {
+      const { data, error } = await supabase.from("products").select("current_stock_qty").eq("id", product.id).single();
+      if (error) {
+        console.error("[orders] Failed to read product stock before restore:", error.message);
+        continue;
+      }
+      const currentQty = Number(data?.current_stock_qty ?? product.current_stock_qty);
+      newQty = roundQuantity(currentQty + qty, product.unit);
+      const { error: updateError } = await supabase.from("products").update({ current_stock_qty: newQty }).eq("id", product.id);
+      if (updateError) {
+        console.error("[orders] Failed to restore product stock in Supabase:", updateError.message);
+        continue;
+      }
+    } else {
+      newQty = roundQuantity(Number(product.current_stock_qty) + qty, product.unit);
+      await dbUpdate("products", product.id, { current_stock_qty: newQty });
+    }
+
+    const local = db.products.find((p: any) => p.id === product.id);
+    if (local) local.current_stock_qty = newQty;
+
+    await dbInsert("inventory_log", {
+      id: crypto.randomUUID(),
+      type: "STOCK_IN",
+      product_id: product.id,
+      product_name: product.name,
+      qty,
+      reason: `Deleted bill ${orderId}`,
+      operator: session?.name || "System",
+      timestamp: new Date().toISOString(),
+    }, db.inventory_log);
+
+    broadcast({ type: "STOCK_UPDATED", payload: { product_id: product.id } });
+  }
 }
 
 function clampMoney(value: any): number {
@@ -752,6 +876,14 @@ async function persistOrder(reqBody: any, session?: any) {
     }
   }
 
+  if (saved.order_status === "Paid") {
+    try {
+      await applyOrderBalanceEffect(saved, 1);
+    } catch (error: any) {
+      console.error("[orders] Failed to apply sale balance effect:", error?.message || error);
+    }
+  }
+
   if (saved.order_source !== "Direct POS") {
     broadcast({ type: "INBOUND_QR_ORDER", payload: { order_id: saved.id, table_number: saved.table_id || "Delivery", bill_amount: saved.grand_total } });
   }
@@ -762,7 +894,9 @@ async function persistOrder(reqBody: any, session?: any) {
 // ─── Orders ──────────────────────────────────────────────────────────────────
 router.get("/orders", async (req, res) => {
   const all = await dbSelect("orders", db.orders);
-  const sorted = all.sort((a: any, b: any) => new Date(b.timestamp ?? 0).getTime() - new Date(a.timestamp ?? 0).getTime());
+  const sorted = all
+    .map((order: any) => ({ ...order, grand_total: normalizeBillGrandTotal(order) }))
+    .sort((a: any, b: any) => new Date(b.timestamp ?? 0).getTime() - new Date(a.timestamp ?? 0).getTime());
   const customer_id = String(req.query.customer_id || "");
   const customer_phone = String(req.query.customer_phone || "");
   const session = (req as any).session;
@@ -946,6 +1080,7 @@ router.patch("/orders/:id", async (req, res) => {
 router.delete("/orders/:id", async (req, res) => {
   const session = (req as any).session;
   const orders = await dbSelect("orders", db.orders);
+  const products = await dbSelect("products", db.products);
   let order = orders.find((o: any) => o.id === req.params.id);
   // Fallback: fetch directly from Supabase in case in-memory is stale
   if (!order && supabase) {
@@ -961,7 +1096,7 @@ router.delete("/orders/:id", async (req, res) => {
     order_status: order.order_status || null,
     payment_mode: order.payment_mode || null,
     items: order.items || null,
-    grand_total: order.grand_total || 0,
+    grand_total: normalizeBillGrandTotal(order),
     discount_applied: order.discount_applied || 0,
     tax_collected: order.tax_collected || 0,
     extraneous_charges: order.extraneous_charges || 0,
@@ -974,6 +1109,14 @@ router.delete("/orders/:id", async (req, res) => {
   };
   const insertResult = await dbInsert("deleted_bills", deletedRow, db.deleted_bills);
 
+  await restoreOrderStock(order.items || [], products, session, order.id);
+  if (String(order.order_status || "").toLowerCase() === "paid") {
+    try {
+      await applyOrderBalanceEffect(order, -1);
+    } catch (error: any) {
+      console.error("[orders] Failed to reverse sale balance effect:", error?.message || error);
+    }
+  }
   await dbDelete("orders", req.params.id);
   const idx = db.orders.findIndex((o: any) => o.id === req.params.id);
   if (idx !== -1) db.orders.splice(idx, 1);
@@ -1010,7 +1153,9 @@ router.post("/deleted-bills", async (req: any, res) => {
 router.get("/deleted-bills", async (req: any, res) => {
   if (!db.deleted_bills) db.deleted_bills = [];
   const all = await dbSelect("deleted_bills", db.deleted_bills);
-  const sorted = all.sort((a: any, b: any) => new Date(b.deleted_at).getTime() - new Date(a.deleted_at).getTime());
+  const sorted = all
+    .map((bill: any) => ({ ...bill, grand_total: normalizeBillGrandTotal(bill) }))
+    .sort((a: any, b: any) => new Date(b.deleted_at).getTime() - new Date(a.deleted_at).getTime());
   const session = req.session;
   // Employees only see their own deleted bills; Admin sees all
   if (session?.employeeId) {
@@ -1025,6 +1170,13 @@ router.patch("/orders/:id/void", async (req, res) => {
   const orders = await dbSelect("orders", db.orders);
   const order = orders.find((o: any) => o.id === req.params.id);
   if (!order) return res.status(404).json({ error: "Not found" });
+  if (String(order.order_status || "").toLowerCase() === "paid") {
+    try {
+      await applyOrderBalanceEffect(order, -1);
+    } catch (error: any) {
+      console.error("[orders] Failed to reverse balance on void:", error?.message || error);
+    }
+  }
   const patch = { order_status: "Void", voided_by: session?.name || "Unknown", voided_at: new Date().toISOString() };
   await dbUpdate("orders", req.params.id, patch);
   const local = db.orders.find((o: any) => o.id === req.params.id);

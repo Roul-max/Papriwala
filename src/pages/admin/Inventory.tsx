@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Package, AlertTriangle, XCircle, Search, Plus, X, Trash2, ArrowDownCircle, ArrowUpCircle, EyeOff, Edit2 } from "lucide-react";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
@@ -47,6 +47,8 @@ export default function Inventory() {
 
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const addProductLockRef = useRef(false);
   const [variantDrafts, setVariantDrafts] = useState<VariantDraft[]>([]);
   const [variantLoading, setVariantLoading] = useState(false);
 
@@ -176,32 +178,50 @@ export default function Inventory() {
 
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (addProductLockRef.current) return;
+    addProductLockRef.current = true;
+    setIsSavingProduct(true);
     setAddError("");
-    if (!addForm.name || !addForm.category || !addForm.price) {
-      setAddError("Name, category and price are required.");
-      return;
+    try {
+      if (!addForm.name || !addForm.category || !addForm.price) {
+        setAddError("Name, category and price are required.");
+        return;
+      }
+      const sku = addForm.sku || nextSku();
+      const currentStockQty = Number(normalizeQuantityInput(addForm.current_stock_qty, addForm.unit)) || 0;
+      const safetyLowThreshold = Number(normalizeQuantityInput(addForm.safety_low_threshold, addForm.unit)) || 0;
+      if (editProductId) {
+        const res = await apiFetch(`/api/products/${editProductId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...addForm, sku, price: Number(Number(addForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold })
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          setAddError(d.error || "Failed to save product.");
+          return;
+        }
+      } else {
+        const res = await apiFetch("/api/products", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...addForm, sku, price: Number(Number(addForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold })
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          setAddError(d.error || "Failed to add product.");
+          return;
+        }
+      }
+      setShowAddModal(false);
+      setEditProductId(null);
+      setAddForm({ ...EMPTY_PRODUCT });
+      setVariantDrafts([]);
+      fetchAll();
+    } finally {
+      addProductLockRef.current = false;
+      setIsSavingProduct(false);
     }
-    const sku = addForm.sku || nextSku();
-    const currentStockQty = Number(normalizeQuantityInput(addForm.current_stock_qty, addForm.unit)) || 0;
-    const safetyLowThreshold = Number(normalizeQuantityInput(addForm.safety_low_threshold, addForm.unit)) || 0;
-    if (editProductId) {
-      await apiFetch(`/api/products/${editProductId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...addForm, sku, price: Number(Number(addForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold })
-      });
-    } else {
-      await apiFetch("/api/products", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...addForm, sku, price: Number(Number(addForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold })
-      });
-    }
-    setShowAddModal(false);
-    setEditProductId(null);
-    setAddForm({ ...EMPTY_PRODUCT });
-    setVariantDrafts([]);
-    fetchAll();
   };
 
   const handleToggleMute = async (p: Product) => {
@@ -243,7 +263,14 @@ export default function Inventory() {
     fetchAll();
   };
 
-  const displayedLog = log.filter(l => logTab === "All" || (logTab === "Stock In" && l.type === "STOCK_IN") || (logTab === "Stock Out" && l.type === "STOCK_OUT"));
+  const displayedLog = log
+    .filter((entry: LogEntry) => {
+      const reason = String(entry.reason || "").trim().toLowerCase();
+      if (reason.startsWith("order ")) return false;
+      if (reason.startsWith("deleted bill ")) return false;
+      return true;
+    })
+    .filter(l => logTab === "All" || (logTab === "Stock In" && l.type === "STOCK_IN") || (logTab === "Stock Out" && l.type === "STOCK_OUT"));
 
   return (
     <div className="space-y-6">
@@ -422,7 +449,7 @@ export default function Inventory() {
           <div className="bg-white rounded-xl w-full max-w-md shadow-2xl max-h-[90vh] flex flex-col">
             <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl">
               <h3 className="font-bold text-maroon text-lg">{editProductId ? "Edit Product" : "Add New Product"}</h3>
-              <button onClick={() => { setShowAddModal(false); setEditProductId(null); setAddForm({ ...EMPTY_PRODUCT }); setVariantDrafts([]); setVariantLoading(false); }}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+              <button onClick={() => { setShowAddModal(false); setEditProductId(null); setAddForm({ ...EMPTY_PRODUCT }); setVariantDrafts([]); setVariantLoading(false); addProductLockRef.current = false; setIsSavingProduct(false); }}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
             </div>
             <form onSubmit={handleAddProduct} className="p-5 space-y-3 overflow-y-auto flex-1">
               {/* Product Image */}
@@ -513,8 +540,8 @@ export default function Inventory() {
                 />
               </div>
               {addError && <p className="text-red-500 text-sm">{addError}</p>}
-              <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">
-                {editProductId ? "Save Changes" : "Add Product"}
+              <button type="submit" disabled={isSavingProduct} className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                {isSavingProduct ? "Saving..." : (editProductId ? "Save Changes" : "Add Product")}
               </button>
             </form>
           </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Search, Plus, Trash2, Printer, ShoppingCart, X, FileDown, EyeOff } from "lucide-react";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
@@ -7,7 +7,6 @@ import { usePrinter } from "../../hooks/usePrinter";
 
 export default function POS() {
   const [products, setProducts] = useState<any[]>([]);
-  const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
   const [cart, setCart] = useState<any[]>([]);
   const [discountFlat, setDiscountFlat] = useState(0);
   const [discountPercent, setDiscountPercent] = useState(0);
@@ -34,6 +33,8 @@ export default function POS() {
   const [posTab, setPosTab] = useState<"billing" | "deleted">("billing");
   const [deletedOrders, setDeletedOrders] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const addActionLockRef = useRef(false);
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   const fetchDeletedOrders = () =>
     apiFetch("/api/deleted-bills").then(r => r.json()).then((d: any[]) =>
@@ -72,7 +73,6 @@ export default function POS() {
     apiFetch("/api/products").then(res => res.json()).then(data => {
       const list = Array.isArray(data) ? data : [];
       setProducts(list);
-      setFilteredProducts(list);
     });
     refreshAnalytics();
     apiFetch("/api/product-variants").then(res => res.json()).then(data => setAllVariants(Array.isArray(data) ? data : []));
@@ -90,19 +90,25 @@ export default function POS() {
     return () => window.removeEventListener("stock-updated", onStockUpdated);
   }, []);
 
-  useEffect(() => {
+  const filteredProducts = useMemo(() => {
     let result = products;
     if (categoryFilter !== "All") result = result.filter(p => p.category === categoryFilter);
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+    if (deferredSearchQuery.trim()) {
+      const q = deferredSearchQuery.toLowerCase();
       result = result.filter(p => p.name?.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q));
     }
-    setFilteredProducts(result);
-  }, [categoryFilter, searchQuery, products]);
+    return result;
+  }, [categoryFilter, deferredSearchQuery, products]);
 
-  const categories = ["All", ...Array.from(new Set(products.map(p => p.category)))];
+  const categories = useMemo(() => ["All", ...Array.from(new Set(products.map(p => p.category)))], [products]);
 
   const handleAddToBill = (product: any) => {
+    if (addActionLockRef.current) return;
+    addActionLockRef.current = true;
+    window.setTimeout(() => {
+      addActionLockRef.current = false;
+    }, 250);
+
     if (product.current_stock_qty <= 0) return;
     const productVariants = allVariants.filter(v => v.product_id === product.id);
     if (productVariants.length > 0) {
@@ -121,6 +127,12 @@ export default function POS() {
   };
 
   const confirmVariantAdd = () => {
+    if (addActionLockRef.current) return;
+    addActionLockRef.current = true;
+    window.setTimeout(() => {
+      addActionLockRef.current = false;
+    }, 250);
+
     if (!variantModal) return;
     const selectedVariant = variantModal.variants.find(v => v.size_label === variantSize);
     const basePrice = selectedVariant ? variantModal.product.price * selectedVariant.variant_price_modifier : variantModal.product.price;
@@ -140,9 +152,16 @@ export default function POS() {
       return [...prev, { ...variantModal.product, id: key, product_id: variantModal.product.id, size: variantSize, price: finalPrice, qty: variantQty, unit: variantUnit }];
     });
     setVariantModal(null);
+    setSearchQuery("");
   };
 
   const confirmQuickAdd = () => {
+    if (addActionLockRef.current) return;
+    addActionLockRef.current = true;
+    window.setTimeout(() => {
+      addActionLockRef.current = false;
+    }, 250);
+
     if (!quickAddModal) return;
     const p = quickAddModal.product;
     const unit = (p.unit || "pcs").toLowerCase();
@@ -167,6 +186,7 @@ export default function POS() {
     setQuickAddModal(null);
     setQuickQty("");
     setQuickAmount("");
+    setSearchQuery("");
   };
 
   const updateCartPrice = (id: string, price: number) => {
@@ -179,7 +199,11 @@ export default function POS() {
       const productId = item.product_id || item.id;
       const product = products.find((p: any) => p.id === productId);
       const maxQty = product?.current_stock_qty ?? Infinity;
-      const clamped = Math.min(Math.max(0.01, qty), maxQty);
+      const unit = (item.unit || product?.unit || "pcs").toLowerCase();
+      const isWeightBased = unit === "gm" || unit === "kg";
+      const clamped = isWeightBased
+        ? Math.min(Math.max(0.01, qty), maxQty)
+        : Math.min(Math.max(1, Math.round(qty)), Math.max(1, Math.floor(maxQty)));
       if (qty > maxQty) alert(`Only ${maxQty} ${item.unit || "pcs"} available for "${item.name}".`);
       return { ...item, qty: clamped };
     }));
@@ -191,13 +215,13 @@ export default function POS() {
 
   const removeFromCart = (id: string) => setCart(prev => prev.filter(item => item.id !== id));
 
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  const clampedFlat = Math.min(Math.max(0, discountFlat), subtotal);
-  const clampedPercent = Math.min(Math.max(0, discountPercent), 100);
-  const discountTotal = discountFlat > 0 ? clampedFlat : subtotal * (clampedPercent / 100);
-  // Tax is informational only — NOT added to grand total
-  const taxes = (subtotal - discountTotal) * 0.05;
-  const grandTotal = Math.max(0, (subtotal - discountTotal) + otherCharges);
+  const subtotal = useMemo(() => cart.reduce((sum, item) => sum + (item.price * item.qty), 0), [cart]);
+  const clampedFlat = useMemo(() => Math.min(Math.max(0, discountFlat), subtotal), [discountFlat, subtotal]);
+  const clampedPercent = useMemo(() => Math.min(Math.max(0, discountPercent), 100), [discountPercent]);
+  const discountTotal = useMemo(() => (discountFlat > 0 ? clampedFlat : subtotal * (clampedPercent / 100)), [clampedFlat, clampedPercent, discountFlat, subtotal]);
+  // Tax is informational only - NOT added to grand total
+  const taxes = useMemo(() => (subtotal - discountTotal) * 0.05, [subtotal, discountTotal]);
+  const grandTotal = useMemo(() => Math.max(0, (subtotal - discountTotal) + otherCharges), [subtotal, discountTotal, otherCharges]);
 
 
   const handleExportPDF = async () => {
@@ -280,7 +304,6 @@ export default function POS() {
     doc.text(`Total Qty: ${totalQty}`, lx, y);
     doc.text(`Sub Total: Rs.${subtotal.toFixed(2)}`, rx, y, { align: "right" });
     y += 10;
-    if (discountTotal > 0) { doc.text(`Discount:`, lx, y); doc.text(`-Rs.${discountTotal.toFixed(2)}`, rx, y, { align: "right" }); y += 10; }
     if (otherCharges > 0) { doc.text(`Other Charges:`, lx, y); doc.text(`Rs.${otherCharges.toFixed(2)}`, rx, y, { align: "right" }); y += 10; }
     doc.text(`Tax 5% (incl.):`, lx, y); doc.text(`Rs.${taxes.toFixed(2)}`, rx, y, { align: "right" }); y += 10;
     divider();
@@ -368,7 +391,6 @@ export default function POS() {
     const cashier = (localStorage.getItem("adminName") || "ADMIN").toUpperCase();
     const totalQty = cart.reduce((s: number, i: any) => s + i.qty, 0);
     const dash = `<div class="div">----------------------------------------</div>`;
-    const discountRow = discountTotal > 0 ? `<div class="row"><span>Discount</span><span>-&#8377;${discountTotal.toFixed(2)}</span></div>` : "";
     const otherRow = otherCharges > 0 ? `<div class="row"><span>Other Charges</span><span>&#8377;${otherCharges.toFixed(2)}</span></div>` : "";
     const itemsHtml = cart.map((item: any) => {
       const isGm = (item.unit || "").toLowerCase() === "gm";
@@ -410,7 +432,7 @@ export default function POS() {
       ${itemsHtml}
       ${dash}
       <div class="row"><span>Total Qty: ${totalQty}</span><span>Sub Total: ${subtotal.toFixed(2)}</span></div>
-      ${discountRow}${otherRow}
+      ${otherRow}
       <div class="row"><span>Tax (5%) incl.</span><span>&#8377;${taxes.toFixed(2)}</span></div>
       ${dash}
       <div class="grand"><span>Grand Total</span><span>&#x20B9;${grandTotal.toFixed(2)}</span></div>
@@ -440,8 +462,10 @@ export default function POS() {
   const handlePlaceAndPrint = async () => {
     if (cart.length === 0 || isSubmitting) return;
     setIsSubmitting(true);
+    await new Promise(requestAnimationFrame);
     try {
       const createdBy = localStorage.getItem("adminName") || "Admin";
+      const nextInvoiceNo = `INV-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
       const res = await apiFetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -458,17 +482,19 @@ export default function POS() {
       // Clear cart immediately after successful order — before print
       const cartSnapshot = [...cart];
       setCart([]); setDiscountFlat(0); setDiscountPercent(0); setOtherCharges(0); setOtherChargesDesc("");
-      generateInvoiceNo();
+      setInvoiceNo(nextInvoiceNo);
       refreshAnalytics();
       const isCash = paymentMode === "Cash";
-      const result = await printReceipt(
-        { invoiceNo, cashier: createdBy, paymentMode, items: cartSnapshot, subtotal, discountTotal, taxes, grandTotal, otherCharges },
-        isCash
-      );
-      if (result.fallback) {
-        handlePrint();
-        if (isCash) openCashDrawer();
-      }
+      void (async () => {
+        const result = await printReceipt(
+          { invoiceNo: nextInvoiceNo, cashier: createdBy, paymentMode, items: cartSnapshot, subtotal, discountTotal, taxes, grandTotal, otherCharges },
+          isCash
+        );
+        if (result.fallback) {
+          handlePrint();
+          if (isCash) openCashDrawer();
+        }
+      })();
     } finally {
       setIsSubmitting(false);
     }
@@ -625,7 +651,11 @@ export default function POS() {
                       <td className="px-1 py-2 text-center text-xs text-gray-500 font-semibold">{item.unit === "gm" ? (item.qty >= 1000 ? "kg" : "gm") : (item.unit || "pcs")}</td>
                       <td className="px-1 py-2 text-center text-xs text-gray-700 font-semibold">{item.unit === "gm" ? (item.qty >= 1000 ? `₹${(item.price * 1000).toFixed(0)}` : `₹${item.price}`) : `₹${item.price}`}</td>
                       <td className="px-1 py-2">
-                        <input type="number" min="0.01" step="0.01"
+                        <input
+                          type="number"
+                          min={item.unit === "gm" || item.unit === "kg" ? "0.01" : "1"}
+                          step={item.unit === "gm" || item.unit === "kg" ? "0.01" : "1"}
+                          inputMode={item.unit === "gm" || item.unit === "kg" ? "decimal" : "numeric"}
                           value={item.unit === "gm" ? (item.qty >= 1000 ? parseFloat((item.qty / 1000).toFixed(3)) : item.qty) : item.qty}
                           onChange={e => updateCartQty(item.id, item.unit === "gm" && item.qty >= 1000 ? Number(e.target.value) * 1000 : Number(e.target.value))}
                           className="w-full border border-gray-300 rounded px-1 py-1 text-xs text-center focus:border-maroon focus:outline-none" />

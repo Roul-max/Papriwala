@@ -190,7 +190,6 @@ function buildReceiptData(params: {
     itemLines,
     divider,
     pad("Subtotal:", `Rs.${subtotal.toFixed(2)}`) + "\n",
-    ...(discountTotal > 0 ? [pad("Discount:", `-Rs.${discountTotal.toFixed(2)}`) + "\n"] : []),
     ...((otherCharges ?? 0) > 0 ? [pad("Other Charges:", `Rs.${(otherCharges ?? 0).toFixed(2)}`) + "\n"] : []),
     pad("Tax 5% (incl.):", `Rs.${taxes.toFixed(2)}`) + "\n",
     divider,
