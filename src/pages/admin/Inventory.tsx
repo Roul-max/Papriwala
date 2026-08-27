@@ -56,6 +56,7 @@ export default function Inventory() {
   const [stockQty, setStockQty] = useState("");
   const [stockReason, setStockReason] = useState("");
   const [stockError, setStockError] = useState("");
+  const [pendingStockAdjust, setPendingStockAdjust] = useState<{ product: Product; type: "in" | "out"; qty: number; reason: string } | null>(null);
 
   const access = useAccess("Inventory");
   const isReadOnly = access === "Read-Only";
@@ -251,15 +252,32 @@ export default function Inventory() {
     if (stockModal.type === "out" && stockModal.product.current_stock_qty - qty < 0) {
       setStockError("Stock cannot go below zero."); return;
     }
-    const res = await apiFetch(`/api/products/${stockModal.product.id}/stock`, {
+    setPendingStockAdjust({
+      product: stockModal.product,
+      type: stockModal.type,
+      qty,
+      reason: stockReason.trim(),
+    });
+  };
+
+  const confirmStockAdjust = async () => {
+    if (!pendingStockAdjust) return;
+    const { product, type, qty, reason } = pendingStockAdjust;
+    const res = await apiFetch(`/api/products/${product.id}/stock`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: stockModal.type, qty, reason: stockReason })
+      body: JSON.stringify({ type, qty, reason })
     });
-    if (!res.ok) { const d = await res.json(); setStockError(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      setStockError(d.error);
+      setPendingStockAdjust(null);
+      return;
+    }
     setStockModal(null);
     setStockQty("");
     setStockReason("");
+    setPendingStockAdjust(null);
     fetchAll();
   };
 
@@ -270,7 +288,10 @@ export default function Inventory() {
       if (reason.startsWith("deleted bill ")) return false;
       return true;
     })
-    .filter(l => logTab === "All" || (logTab === "Stock In" && l.type === "STOCK_IN") || (logTab === "Stock Out" && l.type === "STOCK_OUT"));
+    .filter(l => logTab === "All" || (logTab === "Stock In" && l.type === "STOCK_IN") || (logTab === "Stock Out" && l.type === "STOCK_OUT"))
+    .slice()
+    // Show newest inventory activity first.
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
   return (
     <div className="space-y-6">
@@ -577,7 +598,7 @@ export default function Inventory() {
               <h3 className={`font-bold text-lg ${stockModal.type === "in" ? "text-green-700" : "text-orange-700"}`}>
                 {stockModal.type === "in" ? "Stock In" : "Stock Out"} — {stockModal.product.name}
               </h3>
-              <button onClick={() => setStockModal(null)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+              <button onClick={() => { setStockModal(null); setPendingStockAdjust(null); }}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
             </div>
             <form onSubmit={handleStockAdjust} className="p-5 space-y-4">
               <p className="text-sm text-gray-500">Current stock: <strong>{formatQuantityValue(stockModal.product.current_stock_qty, stockModal.product.unit)}</strong></p>
@@ -593,9 +614,59 @@ export default function Inventory() {
               </div>
               {stockError && <p className="text-red-500 text-sm">{stockError}</p>}
               <button type="submit" className={`w-full text-white font-bold py-2.5 rounded transition-colors ${stockModal.type === "in" ? "bg-green-600 hover:bg-green-700" : "bg-orange-500 hover:bg-orange-600"}`}>
-                Confirm {stockModal.type === "in" ? "Stock In" : "Stock Out"}
+                Review {stockModal.type === "in" ? "Stock In" : "Stock Out"}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Stock Adjust Confirmation Modal */}
+      {pendingStockAdjust && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <div>
+              <h3 className={`font-bold text-lg ${pendingStockAdjust.type === "in" ? "text-green-700" : "text-orange-700"}`}>
+                Confirm {pendingStockAdjust.type === "in" ? "Stock In" : "Stock Out"}
+              </h3>
+              <p className="text-sm text-gray-600 mt-1">
+                Please confirm this inventory change before it is saved.
+              </p>
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-4 text-sm space-y-2">
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Product</span>
+                <span className="font-semibold text-gray-800 text-right">{pendingStockAdjust.product.name}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Action</span>
+                <span className="font-semibold text-gray-800">{pendingStockAdjust.type === "in" ? "Add stock" : "Reduce stock"}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Quantity</span>
+                <span className="font-semibold text-gray-800">{formatQuantityValue(pendingStockAdjust.qty, pendingStockAdjust.product.unit)}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Reason</span>
+                <span className="font-semibold text-gray-800 text-right">{pendingStockAdjust.reason || "—"}</span>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setPendingStockAdjust(null)}
+                className="flex-1 border border-gray-300 rounded py-2 text-sm font-semibold hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { void confirmStockAdjust(); }}
+                className={`flex-1 text-white rounded py-2 text-sm font-semibold transition-colors ${pendingStockAdjust.type === "in" ? "bg-green-600 hover:bg-green-700" : "bg-orange-500 hover:bg-orange-600"}`}
+              >
+                Confirm
+              </button>
+            </div>
           </div>
         </div>
       )}

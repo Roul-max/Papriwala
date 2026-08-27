@@ -34,6 +34,7 @@ export default function POS() {
   const [deletedOrders, setDeletedOrders] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const addActionLockRef = useRef(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
 
   const fetchDeletedOrders = () =>
@@ -89,6 +90,49 @@ export default function POS() {
     window.addEventListener("stock-updated", onStockUpdated);
     return () => window.removeEventListener("stock-updated", onStockUpdated);
   }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (posTab !== "billing") return;
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+
+      const target = event.target as HTMLElement | null;
+      const isEditableTarget =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable);
+
+      if (isEditableTarget || searchInputRef.current === target) return;
+
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        setSearchQuery(prev => prev.slice(0, -1));
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if (event.key.length !== 1) return;
+
+      event.preventDefault();
+      let nextValue = "";
+      setSearchQuery(prev => {
+        nextValue = `${prev}${event.key}`;
+        return nextValue;
+      });
+      searchInputRef.current?.focus();
+      window.requestAnimationFrame(() => {
+        const input = searchInputRef.current;
+        if (!input) return;
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
+      });
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [posTab]);
 
   const filteredProducts = useMemo(() => {
     let result = products;
@@ -564,7 +608,14 @@ export default function POS() {
             </select>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-              <input type="text" placeholder="Search products by name or SKU..." className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded text-sm" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search products by name or SKU..."
+                className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded text-sm"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+              />
             </div>
           </div>
           <div className="overflow-y-auto p-4" style={{maxHeight: "calc(12 * 52px + 48px)"}}>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ChevronDown, ChevronUp, Check, Clock, MessageCircle, EyeOff, Filter, Printer, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Check, Clock, MessageCircle, EyeOff, Filter, Printer, Trash2, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
 import { getCurrentBusinessDateString, getCurrentBusinessMonthString, isWithinBusinessDateRange, toBusinessDateString, toBusinessMonthString } from "../../lib/businessTime";
@@ -75,27 +75,41 @@ function shiftBusinessDate(dateString: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function getSalesPeriodRange(period: SalesPeriod): { start: string; end: string } {
+function shiftBusinessMonth(monthStart: string, months: number): string {
+  const date = new Date(`${monthStart}T00:00:00Z`);
+  date.setUTCMonth(date.getUTCMonth() + months);
+  return date.toISOString().slice(0, 10);
+}
+
+function getSalesPeriodRange(period: SalesPeriod, offset = 0): { start: string; end: string } {
   const today = toBusinessDateString(new Date());
   if (!today) return { start: "", end: "" };
 
   if (period === "day") {
-    return { start: today, end: today };
+    const target = shiftBusinessDate(today, offset);
+    return { start: target, end: target };
   }
 
   if (period === "week") {
-    const current = new Date(`${today}T00:00:00Z`);
+    const target = shiftBusinessDate(today, offset * 7);
+    const current = new Date(`${target}T00:00:00Z`);
     const day = current.getUTCDay();
     const mondayOffset = day === 0 ? -6 : 1 - day;
-    const start = shiftBusinessDate(today, mondayOffset);
+    const start = shiftBusinessDate(target, mondayOffset);
     return { start, end: shiftBusinessDate(start, 6) };
   }
 
-  const start = `${today.slice(0, 7)}-01`;
+  const start = shiftBusinessMonth(`${today.slice(0, 7)}-01`, offset);
   const nextMonth = new Date(`${start}T00:00:00Z`);
   nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
   nextMonth.setUTCDate(0);
   return { start, end: nextMonth.toISOString().slice(0, 10) };
+}
+
+function getSalesPeriodLabel(period: SalesPeriod, offset: number): string {
+  if (period === "day") return offset === 0 ? "Current Day" : offset > 0 ? `Day +${offset}` : `${Math.abs(offset)} Day${Math.abs(offset) === 1 ? "" : "s"} Ago`;
+  if (period === "week") return offset === 0 ? "Current Week" : offset > 0 ? `Week +${offset}` : `${Math.abs(offset)} Week${Math.abs(offset) === 1 ? "" : "s"} Ago`;
+  return offset === 0 ? "Current Month" : offset > 0 ? `Month +${offset}` : `${Math.abs(offset)} Month${Math.abs(offset) === 1 ? "" : "s"} Ago`;
 }
 
 function printOrder(order: Order) {
@@ -163,6 +177,7 @@ export default function AdminOrders() {
   const [filterFrom,  setFilterFrom]  = useState("");
   const [filterTo,    setFilterTo]    = useState("");
   const [salesPeriod, setSalesPeriod] = useState<SalesPeriod>("day");
+  const [salesPeriodOffset, setSalesPeriodOffset] = useState(0);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const access     = useAccess("Orders");
@@ -230,7 +245,7 @@ export default function AdminOrders() {
     })
     .sort((a, b) => (b.timestamp ? new Date(b.timestamp).getTime() : 0) - (a.timestamp ? new Date(a.timestamp).getTime() : 0));
 
-  const salesPeriodRange = getSalesPeriodRange(salesPeriod);
+  const salesPeriodRange = getSalesPeriodRange(salesPeriod, salesPeriodOffset);
   const soldProductMap = new Map<string, { key: string; name: string; size: string; unit: string; qty: number }>();
 
   orders
@@ -549,7 +564,10 @@ export default function AdminOrders() {
             {(["day", "week", "month"] as SalesPeriod[]).map(period => (
               <button
                 key={period}
-                onClick={() => setSalesPeriod(period)}
+                onClick={() => {
+                  setSalesPeriod(period);
+                  setSalesPeriodOffset(0);
+                }}
                 className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors ${
                   salesPeriod === period ? "bg-maroon text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                 }`}
@@ -557,12 +575,33 @@ export default function AdminOrders() {
                 {period === "day" ? "Day" : period === "week" ? "Week" : "Month"}
               </button>
             ))}
+            <button
+              onClick={() => setSalesPeriodOffset(prev => prev - 1)}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200"
+              title="Previous period"
+            >
+              <ChevronLeft size={14} /> Previous
+            </button>
+            <button
+              onClick={() => setSalesPeriodOffset(0)}
+              className="px-3 py-1.5 rounded text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200"
+              title="Return to current period"
+            >
+              Current
+            </button>
+            <button
+              onClick={() => setSalesPeriodOffset(prev => prev + 1)}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200"
+              title="Next period"
+            >
+              Next <ChevronRight size={14} />
+            </button>
           </div>
         </div>
 
         <div className="px-4 py-3 text-xs text-gray-500 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
           <span>
-            Range: {salesPeriodRange.start || "—"} to {salesPeriodRange.end || "—"}
+            Range: {salesPeriodRange.start || "—"} to {salesPeriodRange.end || "—"} {salesPeriodRange.start ? `(${getSalesPeriodLabel(salesPeriod, salesPeriodOffset)})` : ""}
           </span>
           <span>{soldProductRows.length} product(s)</span>
         </div>
