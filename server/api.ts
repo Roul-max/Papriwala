@@ -47,6 +47,11 @@ function roundQuantity(value: any, unit: any): number {
   return isDecimalQuantityUnit(unit) ? Number(amount.toFixed(3)) : Math.round(amount);
 }
 
+function isMobileVisibilityRequest(req: any): boolean {
+  const mobile = String(req.query?.mobile ?? req.headers?.["x-mobile-client"] ?? "").toLowerCase();
+  return mobile === "1" || mobile === "true" || mobile === "yes";
+}
+
 function isBcryptHash(value: unknown): value is string {
   return typeof value === "string" && /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(value);
 }
@@ -430,14 +435,21 @@ router.post("/auth/set-password", roleAuthMiddleware, async (req, res) => {
 });
 
 // ─── Products ────────────────────────────────────────────────────────────────
-router.get("/products", async (_req, res) => {
-  res.json(await dbSelect("products", db.products));
+router.get("/products", async (req, res) => {
+  const products = await dbSelect("products", db.products);
+  if (isMobileVisibilityRequest(req)) {
+    return res.json(products.filter((p: any) => p.show_in_mobile !== false));
+  }
+  res.json(products);
 });
 
 router.get("/products/:id", async (req, res) => {
   const products = await dbSelect("products", db.products);
   const product = products.find((p: any) => p.id === req.params.id);
   if (!product) return res.status(404).json({ error: "Not found" });
+  if (isMobileVisibilityRequest(req) && product.show_in_mobile === false) {
+    return res.status(404).json({ error: "Not found" });
+  }
   res.json(product);
 });
 
@@ -458,6 +470,7 @@ router.post("/products", async (req, res) => {
     unit_purchase_cost: roundMoney(unit_purchase_cost),
     safety_low_threshold: roundQuantity(safety_low_threshold, normalizedUnit) || 5,
     current_stock_qty: roundQuantity(current_stock_qty, normalizedUnit),
+    show_in_mobile: req.body.show_in_mobile !== undefined ? Boolean(req.body.show_in_mobile) : true,
   };
   const saved = await dbInsert("products", newProduct, db.products);
   await dbInsert("inventory_log", {
@@ -492,6 +505,7 @@ router.patch("/products/:id", async (req, res) => {
     ...(req.body.current_stock_qty !== undefined ? { current_stock_qty: roundQuantity(req.body.current_stock_qty, effectiveUnit) } : {}),
     ...(req.body.safety_low_threshold !== undefined ? { safety_low_threshold: roundQuantity(req.body.safety_low_threshold, effectiveUnit) } : {}),
     ...(req.body.unit !== undefined ? { unit: effectiveUnit } : {}),
+    ...(req.body.show_in_mobile !== undefined ? { show_in_mobile: Boolean(req.body.show_in_mobile) } : {}),
   };
   const updated = await dbUpdate("products", req.params.id, patch);
   const local = db.products.find((p: any) => p.id === req.params.id);
@@ -1188,6 +1202,7 @@ router.patch("/orders/:id/void", async (req, res) => {
 router.get("/search", async (req, res) => {
   const query = req.query.q?.toString().toLowerCase() || "";
   if (query.length < 2) return res.json({ products: [], dealers: [], employees: [] });
+  const mobileOnly = isMobileVisibilityRequest(req);
 
   const [products, dealers, employees] = await Promise.all([
     dbSelect("products", db.products),
@@ -1196,7 +1211,7 @@ router.get("/search", async (req, res) => {
   ]);
 
   res.json({
-    products:  products.filter((p: any) => p.name?.toLowerCase().includes(query) || p.sku?.toLowerCase().includes(query) || p.id?.toLowerCase().includes(query)),
+    products:  products.filter((p: any) => (mobileOnly ? p.show_in_mobile !== false : true) && (p.name?.toLowerCase().includes(query) || p.sku?.toLowerCase().includes(query) || p.id?.toLowerCase().includes(query))),
     dealers:   dealers.filter((d: any) => d.name?.toLowerCase().includes(query) || d.gstin?.toLowerCase().includes(query)),
     employees: employees.filter((e: any) => e.name?.toLowerCase().includes(query) || e.full_name?.toLowerCase().includes(query) || e.id?.toLowerCase().includes(query)),
   });

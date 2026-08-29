@@ -4,7 +4,7 @@ import { apiFetch } from "../../lib/apiFetch";
 import { useAccess } from "../../hooks/useAccess";
 
 const EMPTY_CAT = { name: "", image: "" };
-const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs", image: "" };
+const EMPTY_PRODUCT = { name: "", sku: "", category: "", unit_purchase_cost: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "pcs", image: "", show_in_mobile: true };
 const DECIMAL_UNITS = new Set(["gm", "kg", "g", "gram", "grams", "ltr", "l", "liter", "litre"]);
 
 const normalizeUnit = (unit?: string) => (unit || "pcs").toLowerCase();
@@ -92,7 +92,7 @@ export default function AdminCategories() {
     await apiFetch("/api/products", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...productForm, unit_purchase_cost: Number(Number(productForm.unit_purchase_cost).toFixed(2)), price: Number(Number(productForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold }),
+      body: JSON.stringify({ ...productForm, unit_purchase_cost: Number(Number(productForm.unit_purchase_cost).toFixed(2)), price: Number(Number(productForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold, show_in_mobile: productForm.show_in_mobile ?? true }),
     });
     setProductModal(null);
     setProductForm({ ...EMPTY_PRODUCT });
@@ -107,7 +107,7 @@ export default function AdminCategories() {
   };
 
   const openEditProduct = (p: any) => {
-    setEditProductForm({ name: p.name, sku: p.sku || "", category: p.category, unit_purchase_cost: p.unit_purchase_cost ?? "", price: p.price ?? "", current_stock_qty: p.current_stock_qty ?? "", safety_low_threshold: p.safety_low_threshold ?? "5", unit: p.unit || "pcs", image: p.image || "" });
+    setEditProductForm({ name: p.name, sku: p.sku || "", category: p.category, unit_purchase_cost: p.unit_purchase_cost ?? "", price: p.price ?? "", current_stock_qty: p.current_stock_qty ?? "", safety_low_threshold: p.safety_low_threshold ?? "5", unit: p.unit || "pcs", image: p.image || "", show_in_mobile: p.show_in_mobile ?? true });
     setEditProductError("");
     setEditProductModal({ open: true, product: p });
   };
@@ -121,7 +121,7 @@ export default function AdminCategories() {
     await apiFetch(`/api/products/${editProductModal!.product.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...editProductForm, unit_purchase_cost: Number(Number(editProductForm.unit_purchase_cost).toFixed(2)), price: Number(Number(editProductForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold }),
+      body: JSON.stringify({ ...editProductForm, unit_purchase_cost: Number(Number(editProductForm.unit_purchase_cost).toFixed(2)), price: Number(Number(editProductForm.price).toFixed(2)), current_stock_qty: currentStockQty, safety_low_threshold: safetyLowThreshold, show_in_mobile: editProductForm.show_in_mobile ?? true }),
     });
     setEditProductModal(null);
     showToast("Product updated.");
@@ -319,6 +319,15 @@ export default function AdminCategories() {
                   {productForm.image && <button type="button" onClick={() => setProductForm(prev => ({ ...prev, image: "" }))} className="text-gray-400 hover:text-red-500 shrink-0"><X size={16} /></button>}
                 </div>
               </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700 font-medium">
+                <input
+                  type="checkbox"
+                  checked={(productForm as any).show_in_mobile ?? true}
+                  onChange={e => setProductForm(prev => ({ ...prev, show_in_mobile: e.target.checked }))}
+                  className="accent-maroon"
+                />
+                Show this product in the mobile app
+              </label>
               {productError && <p className="text-red-500 text-sm">{productError}</p>}
               <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">
                 Add Product
@@ -375,6 +384,15 @@ export default function AdminCategories() {
                   {editProductForm.image && <button type="button" onClick={() => setEditProductForm(prev => ({ ...prev, image: "" }))} className="text-gray-400 hover:text-red-500 shrink-0"><X size={16} /></button>}
                 </div>
               </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700 font-medium">
+                <input
+                  type="checkbox"
+                  checked={(editProductForm as any).show_in_mobile ?? true}
+                  onChange={e => setEditProductForm(prev => ({ ...prev, show_in_mobile: e.target.checked }))}
+                  className="accent-maroon"
+                />
+                Show this product in the mobile app
+              </label>
               {editProductError && <p className="text-red-500 text-sm">{editProductError}</p>}
               <button type="submit" className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2">
                 Save Changes

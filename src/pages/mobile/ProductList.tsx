@@ -23,7 +23,7 @@ export default function ProductList() {
         const cat = all.find((c: any) => c.id === id);
         const name = cat?.name || "";
         setCategoryName(name);
-        return fetch("/api/products").then(r => r.json()).then(pdata => {
+        return fetch("/api/products?mobile=1").then(r => r.json()).then(pdata => {
           const prods = Array.isArray(pdata) ? pdata : [];
           setProducts(prods.filter((p: any) =>
             p.category_id === id ||

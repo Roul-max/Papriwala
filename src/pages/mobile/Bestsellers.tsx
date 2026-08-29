@@ -8,7 +8,7 @@ export default function Bestsellers() {
   const [products, setProducts] = useState<any[]>([]);
 
   useEffect(() => {
-    apiFetch("/api/products")
+    apiFetch("/api/products?mobile=1")
       .then(r => r.json())
       .then(data => setProducts(Array.isArray(data) ? data : []))
       .catch(() => {});

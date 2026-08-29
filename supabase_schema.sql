@@ -28,5 +28,8 @@ ALTER TABLE IF EXISTS public.products
   ALTER COLUMN price TYPE numeric USING price::numeric,
   ALTER COLUMN unit_purchase_cost TYPE numeric USING unit_purchase_cost::numeric;
 
+ALTER TABLE IF EXISTS public.products
+  ADD COLUMN IF NOT EXISTS show_in_mobile boolean NOT NULL DEFAULT true;
+
 ALTER TABLE IF EXISTS public.inventory_log
   ALTER COLUMN qty TYPE numeric USING qty::numeric;

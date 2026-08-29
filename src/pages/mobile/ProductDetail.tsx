@@ -8,6 +8,7 @@ export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [product, setProduct] = useState<any>(null);
+  const [notFound, setNotFound] = useState(false);
   const [qty, setQty] = useState(1);
   const [gmInput, setGmInput] = useState("");
   const [variants, setVariants] = useState<any[]>([]);
@@ -16,9 +17,16 @@ export default function ProductDetail() {
   const { addToCart } = useCart();
 
   useEffect(() => {
-    fetch(`/api/products/${id}`)
-      .then(res => res.json())
-      .then(data => setProduct(data?.id ? data : null));
+    fetch(`/api/products/${id}?mobile=1`)
+      .then(res => {
+        if (!res.ok) throw new Error("not-found");
+        return res.json();
+      })
+      .then(data => setProduct(data?.id ? data : null))
+      .catch(() => {
+        setProduct(null);
+        setNotFound(true);
+      });
     fetch(`/api/product-variants?product_id=${id}`)
       .then(res => res.json())
       .then(data => {
@@ -27,6 +35,21 @@ export default function ProductDetail() {
         if (list.length > 0) setSelectedSize(list[0].size_label);
       });
   }, [id]);
+
+  if (notFound) {
+    return (
+      <div className="flex min-h-full flex-col items-center justify-center bg-cream-light px-6 text-center">
+        <h2 className="font-serif text-2xl text-maroon font-bold">Product not available</h2>
+        <p className="mt-2 text-sm text-gray-500">This item is hidden from the mobile app or no longer exists.</p>
+        <button
+          onClick={() => navigate(-1)}
+          className="mt-6 bg-maroon text-white px-5 py-3 rounded-full font-semibold"
+        >
+          Go Back
+        </button>
+      </div>
+    );
+  }
 
   if (!product) return null;
 

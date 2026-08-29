@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Package, AlertTriangle, XCircle, Search, Plus, X, Trash2, ArrowDownCircle, ArrowUpCircle, EyeOff, Edit2 } from "lucide-react";
+import { Package, AlertTriangle, XCircle, Search, Plus, X, Trash2, ArrowDownCircle, ArrowUpCircle, EyeOff, Eye, Edit2 } from "lucide-react";
 import { useAccess } from "../../hooks/useAccess";
 import { apiFetch } from "../../lib/apiFetch";
-type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; muted?: boolean; image?: string; unit?: string; description?: string; };
+type Product = { id: string; name: string; category: string; sku: string; current_stock_qty: number; unit_purchase_cost: number; price: number; safety_low_threshold: number; muted?: boolean; show_in_mobile?: boolean; image?: string; unit?: string; description?: string; };
 type LogEntry = { id: string; type: "STOCK_IN" | "STOCK_OUT"; product_name: string; qty: number; reason: string; operator: string; timestamp: string; };
 type VariantDraft = { id: string; size_label: string; price: string };
 
-const EMPTY_PRODUCT = { name: "", sku: "", category: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "gm", image: "", description: "" };
+const EMPTY_PRODUCT = { name: "", sku: "", category: "", price: "", current_stock_qty: "", safety_low_threshold: "5", unit: "gm", image: "", description: "", show_in_mobile: true };
 const DECIMAL_UNITS = new Set(["gm", "kg", "g", "gram", "grams", "ltr", "l", "liter", "litre"]);
 
 const normalizeUnit = (unit?: string) => (unit || "pcs").toLowerCase();
@@ -36,6 +36,7 @@ export default function Inventory() {
   const [categories, setCategories] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("All Items");
   const [logTab, setLogTab] = useState("All");
+  const [viewMode, setViewMode] = useState<"products" | "audit-log">("products");
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
 
@@ -60,6 +61,10 @@ export default function Inventory() {
 
   const access = useAccess("Inventory");
   const isReadOnly = access === "Read-Only";
+  const goToAuditLog = () => {
+    setViewMode("audit-log");
+    document.getElementById("inventory-audit-log")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   const fetchAll = () => {
     apiFetch("/api/products").then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : []));
@@ -102,6 +107,7 @@ export default function Inventory() {
       unit: p.unit || "gm",
       image: p.image || "",
       description: p.description || "",
+      show_in_mobile: p.show_in_mobile ?? true,
     });
     setVariantLoading(true);
     setShowAddModal(true);
@@ -235,6 +241,16 @@ export default function Inventory() {
     setProducts(prev => prev.map(x => x.id === p.id ? { ...x, muted: updated.muted } : x));
   };
 
+  const handleToggleMobileVisibility = async (p: Product) => {
+    const nextVisible = !(p.show_in_mobile ?? true);
+    await apiFetch(`/api/products/${p.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ show_in_mobile: nextVisible }),
+    });
+    setProducts(prev => prev.map(x => x.id === p.id ? { ...x, show_in_mobile: nextVisible } : x));
+  };
+
   const handleDelete = async () => {
     if (!deleteTarget || !deleteConfirm) return;
     await apiFetch(`/api/products/${deleteTarget.id}`, { method: "DELETE" });
@@ -320,6 +336,12 @@ export default function Inventory() {
             ))}
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={goToAuditLog}
+              className={`px-4 py-2 rounded text-sm font-semibold transition-colors border ${viewMode === "audit-log" ? "bg-maroon text-white border-maroon" : "bg-white text-maroon border-maroon/30 hover:bg-maroon/5"}`}
+            >
+              Jump to Audit Log
+            </button>
             {isReadOnly && (
               <span className="flex items-center gap-1 text-xs text-yellow-600 bg-yellow-50 border border-yellow-200 px-3 py-2 rounded font-semibold">
                 <EyeOff size={12} /> Read-Only Mode
@@ -344,9 +366,9 @@ export default function Inventory() {
           </select>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="inventory-scrollbar max-h-[560px] overflow-auto">
           <table className="w-full text-sm text-left">
-            <thead className="text-xs text-gray-500 uppercase bg-white border-b border-gray-200">
+            <thead className="sticky top-0 z-10 text-xs text-gray-500 uppercase bg-white border-b border-gray-200">
               <tr>
                 <th className="py-3 px-4"># ID</th>
                 <th className="py-3 px-4">Product</th>
@@ -400,6 +422,11 @@ export default function Inventory() {
                             className="text-green-600 hover:bg-green-50 p-1.5 rounded" title="Stock In"><ArrowDownCircle size={16} /></button>
                           <button onClick={() => { setStockModal({ product: p, type: "out" }); setStockQty(""); setStockReason(""); setStockError(""); }}
                             className="text-orange-500 hover:bg-orange-50 p-1.5 rounded" title="Stock Out"><ArrowUpCircle size={16} /></button>
+                          <button onClick={() => handleToggleMobileVisibility(p)}
+                            className={`p-1.5 rounded text-xs font-bold ${p.show_in_mobile ?? true ? "text-emerald-600 hover:bg-emerald-50" : "text-gray-400 hover:bg-gray-50"}`}
+                            title={p.show_in_mobile ?? true ? "Hide from mobile app" : "Show in mobile app"}>
+                            {p.show_in_mobile ?? true ? <Eye size={16} /> : <EyeOff size={16} />}
+                          </button>
                           <button onClick={() => handleToggleMute(p)}
                             className={`p-1.5 rounded text-xs font-bold ${p.muted ? "text-gray-400 hover:bg-gray-50" : "text-blue-500 hover:bg-blue-50"}`}
                             title={p.muted ? "Unmute" : "Mute"}>{p.muted ? "🔔" : "🔕"}</button>
@@ -419,7 +446,7 @@ export default function Inventory() {
       </div>
 
       {/* Inventory Audit Log */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-100">
+      <div id="inventory-audit-log" className="bg-white rounded-lg shadow-sm border border-gray-100 scroll-mt-24">
         <div className="p-4 border-b border-gray-100 flex items-center justify-between">
           <h3 className="font-serif text-lg text-maroon font-bold">Inventory Audit Log</h3>
           <div className="flex gap-2">
@@ -431,9 +458,9 @@ export default function Inventory() {
             ))}
           </div>
         </div>
-        <div className="overflow-x-auto">
+        <div className="inventory-scrollbar max-h-[520px] overflow-auto">
           <table className="w-full text-sm text-left">
-            <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
+            <thead className="sticky top-0 z-10 text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="py-3 px-4">Type</th>
                 <th className="py-3 px-4">Product</th>
@@ -560,6 +587,15 @@ export default function Inventory() {
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-1 focus:outline-none focus:border-maroon resize-none"
                 />
               </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700 font-medium">
+                <input
+                  type="checkbox"
+                  checked={(addForm as any).show_in_mobile ?? true}
+                  onChange={e => setAddForm(prev => ({ ...prev, show_in_mobile: e.target.checked }))}
+                  className="accent-maroon"
+                />
+                Show this product in the mobile app
+              </label>
               {addError && <p className="text-red-500 text-sm">{addError}</p>}
               <button type="submit" disabled={isSavingProduct} className="w-full bg-maroon text-white font-bold py-2.5 rounded hover:bg-maroon-light transition-colors mt-2 disabled:opacity-50 disabled:cursor-not-allowed">
                 {isSavingProduct ? "Saving..." : (editProductId ? "Save Changes" : "Add Product")}

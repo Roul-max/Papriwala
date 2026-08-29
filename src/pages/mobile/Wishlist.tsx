@@ -9,7 +9,7 @@ export default function Wishlist() {
   const [products, setProducts] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch("/api/products")
+    fetch("/api/products?mobile=1")
       .then(res => res.json())
       .then(data => setProducts(data));
   }, []);

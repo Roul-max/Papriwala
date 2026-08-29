@@ -46,7 +46,7 @@ export default function Home() {
   }, [searchQuery, allProducts, categories]);
 
   useEffect(() => {
-    apiFetch("/api/products")
+    apiFetch("/api/products?mobile=1")
       .then(res => res.json())
       .then(data => {
         const list = Array.isArray(data) ? data : [];
